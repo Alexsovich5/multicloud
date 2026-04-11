@@ -1,0 +1,10 @@
+# Multi-Cloud Management Platform
+# Python 3.7 Dependencies - 2018
+
+boto3==1.9.0
+azure-mgmt-compute==4.0.0
+azure-mgmt-resource==2.0.0
+graphene==2.1.0
+flask==1.0.2
+flask-graphql==2.0.0
+PyYAML==3.13
