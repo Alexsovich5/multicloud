@@ -1,6 +1,5 @@
 """
 Multi-Cloud Manager
-IT Operations Specialist - ACORIA (2018)
 
 Unified interface for managing resources across AWS and Azure.
 """

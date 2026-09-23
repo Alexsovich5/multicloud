@@ -1,6 +1,5 @@
 """
 AWS Cloud Provider
-IT Operations Specialist - ACORIA (2018)
 """
 
 import boto3

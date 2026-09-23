@@ -1,5 +1,4 @@
 # Multi-Cloud Terraform Configuration
-# IT Operations Specialist - ACORIA (2018)
 
 provider "aws" {
   region = "us-east-1"
@@ -17,12 +16,12 @@ module "aws_compute" {
 }
 
 resource "azurerm_resource_group" "main" {
-  name     = "acoria-multicloud-rg"
+  name     = "multicloud-demo-rg"
   location = "East US"
 }
 
 resource "azurerm_virtual_machine" "app" {
-  name                  = "acoria-app-vm"
+  name                  = "demo-app-vm"
   location              = azurerm_resource_group.main.location
   resource_group_name   = azurerm_resource_group.main.name
   vm_size               = "Standard_B2s"
@@ -36,7 +35,7 @@ resource "azurerm_virtual_machine" "app" {
   }
 
   os_profile {
-    computer_name  = "acoria-app"
+    computer_name  = "demo-app"
     admin_username = "adminuser"
   }
 

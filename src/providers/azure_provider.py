@@ -1,6 +1,5 @@
 """
 Azure Cloud Provider
-IT Operations Specialist - ACORIA (2018)
 """
 
 import logging
@@ -13,7 +12,7 @@ class AzureProvider:
 
     def __init__(self, config):
         self.subscription_id = config.get('subscription_id', '')
-        self.resource_group = config.get('resource_group', 'acoria-rg')
+        self.resource_group = config.get('resource_group', 'demo-rg')
         self.location = config.get('location', 'eastus')
 
     def list_instances(self):
