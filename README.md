@@ -1,62 +1,44 @@
 # Multi-Cloud Management Platform
 
-![Project Status](https://img.shields.io/badge/Status-Complete-brightgreen)
-![Timeline](https://img.shields.io/badge/Timeline-July%202018%20--%20November%202018-blue)
-![Technology](https://img.shields.io/badge/Tech-Terraform%20%7C%20Python%203.7%20%7C%20Kubernetes%20%7C%20GraphQL-orange)
-
-## Project Overview
-
 Unified multi-cloud management platform for provisioning and managing resources across AWS and Azure with Terraform, a Python API layer, and GraphQL interface.
 
-**Role**: IT Operations Specialist
-**Organization**: ACORIA
-**Duration**: July 2018 - November 2018
-**Project**: #17 of 30 in IT Career Portfolio
+Personal project, built to explore a single provisioning abstraction over AWS and Azure. It is not production software — see **Status** below for exactly what is and isn't implemented.
 
-## Business Impact
+## Status
 
-- **Single Pane of Glass**: Unified view across AWS and Azure
-- **50% Faster Provisioning**: Terraform-automated multi-cloud deployments
-- **Cost Visibility**: Cross-cloud cost tracking and optimization
-- **Vendor Flexibility**: Avoid lock-in with abstracted provider layer
+**Implemented**
 
-## Technology Stack
+- Provider abstraction with concrete AWS and Azure implementations
+- Cloud manager dispatching to the right provider
+- Terraform for both clouds
 
-- **Terraform 0.11**: Multi-cloud Infrastructure as Code
-- **Python 3.7**: Backend API and orchestration
-- **Kubernetes 1.11**: Container orchestration
-- **GraphQL**: Flexible API query layer
+**Not implemented / known limitations**
 
-## Project Structure
+- No GraphQL layer despite `graphene`/`flask-graphql` being declared as dependencies
+- Covers compute and resource groups only — no storage, networking or IAM
+- No tests
 
-```
-multicloud/
-├── README.md
-├── requirements.txt
-├── docker-compose.yml
-├── src/
-│   ├── cloud_manager.py
-│   ├── graphql_schema.py
-│   └── providers/
-│       ├── aws_provider.py
-│       └── azure_provider.py
-├── terraform/
-│   ├── main.tf
-│   └── modules/compute/
-│       └── main.tf
-└── k8s/
-    └── deployment.yaml
+## Built with
+
+- **Python** — boto3, azure-mgmt-compute, azure-mgmt-resource, graphene, flask, flask-graphql, PyYAML
+
+## Running it
+
+```bash
+pip install -r requirements.txt
+python src/cloud_manager.py
 ```
 
-## Contributing
+## Layout
 
-This is a historical project from July 2018 - November 2018, preserved for portfolio purposes.
+```
+requirements.txt
+src/
+  cloud_manager.py
+  providers/
+    aws_provider.py
+    azure_provider.py
+terraform/
+  main.tf
+```
 
-## License
-
-Professional portfolio project - ACORIA
-
----
-
-**Developed during July 2018 - November 2018**
-*Part of Alexander Efrem's IT Career Portfolio (2012-2024)*
