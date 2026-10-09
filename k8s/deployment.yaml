@@ -1,0 +1,66 @@
+# GraphQL API for the multicloud manager. The endpoint variables point the
+# providers at the moto and fake ARM simulators; remove them to use the
+# real AWS and Azure APIs.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: multicloud-api
+  labels:
+    app: multicloud-api
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: multicloud-api
+  template:
+    metadata:
+      labels:
+        app: multicloud-api
+    spec:
+      containers:
+        - name: api
+          image: multicloud:dev
+          imagePullPolicy: IfNotPresent
+          command: ["gunicorn", "-b", "0.0.0.0:8000", "app:create_app()"]
+          ports:
+            - name: http
+              containerPort: 8000
+          env:
+            - name: MC_AWS_ENDPOINT
+              value: http://moto:5000
+            - name: MC_AZURE_BASE_URL
+              value: http://fake-arm:5001
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8000
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: multicloud-api
+  labels:
+    app: multicloud-api
+spec:
+  type: ClusterIP
+  selector:
+    app: multicloud-api
+  ports:
+    - name: http
+      port: 80
+      targetPort: 8000
