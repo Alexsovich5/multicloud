@@ -1,0 +1,12 @@
+aws:
+  region: us-east-1
+  endpoint_url: http://moto:5000      # MC_AWS_ENDPOINT overrides; omit for real AWS
+  default_image: ami-12345678
+  default_size: t2.micro
+azure:
+  subscription_id: 00000000-0000-0000-0000-000000000000
+  resource_group: multicloud-demo-rg
+  location: eastus
+  base_url: http://fake-arm:5001      # MC_AZURE_BASE_URL overrides; omit for real ARM
+  default_size: Standard_B1s
+pricing_file: config/pricing.yaml
