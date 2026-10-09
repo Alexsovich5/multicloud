@@ -1,0 +1,32 @@
+version: "3.6"
+
+# One image serves all three services; only api builds it.
+services:
+  api:
+    build: .
+    image: multicloud:dev
+    command: gunicorn -b 0.0.0.0:8000 "app:create_app()"
+    environment:
+      MC_AWS_ENDPOINT: http://moto:5000
+      MC_AZURE_BASE_URL: http://fake-arm:5001
+    depends_on:
+      - moto
+      - fake-arm
+    ports:
+      - "20901:8000"
+
+  moto:
+    image: multicloud:dev
+    command: moto_server ec2 -H 0.0.0.0 -p 5000
+
+  fake-arm:
+    image: multicloud:dev
+    command: python -m simulators.fake_arm
+    environment:
+      PORT: "5001"
+
+networks:
+  default:
+    ipam:
+      config:
+        - subnet: 172.49.0.0/24

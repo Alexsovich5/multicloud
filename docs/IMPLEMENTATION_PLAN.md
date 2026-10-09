@@ -267,17 +267,17 @@ Conventions used throughout:
 - **Goal:** `api` + `moto` + `fake-arm` run together, and the end-to-end flow is tested over HTTP.
 - **Files:**
   - create `docker-compose.yml` (version "3.6"):
-    - `api`: `build: .` and `image: multicloud:dev`, command `gunicorn -b 0.0.0.0:8000 "app:create_app()"`, env `MC_AWS_ENDPOINT=http://moto:5000` and `MC_AZURE_BASE_URL=http://fake-arm:5001`, `depends_on` both, ports `8000:8000`;
+    - `api`: `build: .` and `image: multicloud:dev`, command `gunicorn -b 0.0.0.0:8000 "app:create_app()"`, env `MC_AWS_ENDPOINT=http://moto:5000` and `MC_AZURE_BASE_URL=http://fake-arm:5001`, `depends_on` both, ports `20901:8000` (gunicorn stays on 8000 in the container; host port 20901 because this Docker host is shared and this project is limited to host ports 20900-20999, with 20900 taken by `make run`);
     - `moto`: `image: multicloud:dev` (no `build`), command `moto_server ec2 -H 0.0.0.0 -p 5000`;
     - `fake-arm`: `image: multicloud:dev` (no `build`), command `python -m simulators.fake_arm`, `PORT=5001`.
-    One image serves all three services, as SPEC states.
+    One image serves all three services, as SPEC states. The default network uses the fixed subnet `172.49.0.0/24` (`networks.default.ipam`) so it does not collide with other projects on the same host.
   - create `tests/integration/__init__.py` and `tests/integration/conftest.py`. The conftest reads `API_URL` (default `http://api:8000`), `MOTO_URL` (default `http://moto:5000`) and `FAKE_ARM_URL` (default `http://fake-arm:5001`), and polls all three for up to 60 s (`/healthz` must return 200; for moto and fake-arm any HTTP response counts) before any test runs. If `API_URL` is unset outside compose, the tests are skipped.
   - create `tests/integration/test_stack.py`.
   - modify `Makefile`:
     - `up`: `$(COMPOSE) up -d --build`;
     - `down`: `$(COMPOSE) down -v`;
     - `integration: build`: `up`, then `$(COMPOSE) run --rm -e API_URL=http://api:8000 api python -m pytest tests/integration -q`, then `down`, preserving the exit code;
-    - `smoke`: curl a `{ instances { id provider } costs { total } }` query to `localhost:8000/graphql`.
+    - `API_PORT ?= 20901` and `smoke`: curl a `{ instances { id provider } costs { total } }` query to `localhost:$(API_PORT)/graphql`.
 - **Tests to write first:**
   - provision `aws/web-aws` and `azure/web-azure` via mutations;
   - `instances` contains both providers;
