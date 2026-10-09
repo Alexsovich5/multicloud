@@ -119,7 +119,7 @@ Conventions used throughout:
 - **Files:**
   - create `simulators/fake_arm.py`:
     - `create_app()` is a Flask app holding in-memory RG and VM dicts;
-    - routes as listed in SPEC;
+    - routes as listed in SPEC, including HEAD on a resource group (204 if it exists, 404 if not), because `resource_groups.check_existence` treats any other status as an error and Flask would otherwise answer HEAD through the GET view with 200;
     - case-insensitive paths: Flask matches the URL before any `before_request` hook runs and Werkzeug rules are case-sensitive, so `create_app()` wraps `app.wsgi_app` in a WSGI middleware that copies `environ["PATH_INFO"]` to `environ["fake_arm.original_path"]` and then lower-cases `PATH_INFO`. All routes are declared in lower case. RG and VM dicts are keyed by the lower-cased name, and response bodies use the original-case name recovered from the saved path;
     - ARM-style error JSON (`{"error": {"code": "ResourceNotFound", "message": ...}}`);
     - `main()` runs on `0.0.0.0:${PORT:-5001}`.
@@ -129,6 +129,7 @@ Conventions used throughout:
   - PUT VM sets `properties.provisioningState == "Succeeded"` and the `id` path;
   - list returns `{"value": [...]}` filtered by RG;
   - DELETE gives 200, then GET gives 404;
+  - HEAD on a resource group gives 404 before it is created and 204 after;
   - `resourcegroups` and `resourceGroups` paths both match (through the test client, so the middleware is exercised), and a VM created as `Web1` is returned with `name == "Web1"`;
   - two `create_app()` instances don't share state.
 - **Acceptance:** `make test`

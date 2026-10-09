@@ -158,6 +158,7 @@ An unknown provider returns a GraphQL error (`errors[0].message = "Unknown provi
 |---|---|---|
 | PUT | `/subscriptions/{sub}/resourcegroups/{rg}` | create/update RG → 201/200 |
 | GET | `/subscriptions/{sub}/resourcegroups/{rg}` | 200 or 404 |
+| HEAD | `/subscriptions/{sub}/resourcegroups/{rg}` | 204 or 404 (`resource_groups.check_existence`) |
 | GET | `/subscriptions/{sub}/resourceGroups/{rg}/providers/Microsoft.Compute/virtualMachines` | `{"value":[...]}` |
 | PUT | `.../virtualMachines/{name}` | store VM, `provisioningState: Succeeded` → 200 |
 | GET | `.../virtualMachines/{name}` | 200 or 404 (ARM error body) |
