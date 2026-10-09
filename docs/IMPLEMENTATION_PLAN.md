@@ -247,7 +247,7 @@ Conventions used throughout:
   - create `src/app.py`:
     - `create_app(manager=None)` builds a Flask app. It registers `/graphql` via `GraphQLView.as_view("graphql", schema=schema, graphiql=True, root_value=manager or build_manager())` and `/healthz` returning JSON;
     - no module-level `app` object: gunicorn 19.9 evaluates the factory call itself (`gunicorn "app:create_app()"`), so importing `app` in tests never calls `build_manager()`;
-  - modify `Makefile`: add a `run` target (`docker run --rm -p 8000:8000 $(IMAGE) gunicorn -b 0.0.0.0:8000 "app:create_app()"`);
+  - modify `Makefile`: add `RUN_PORT ?= 20900` and a `run: build` target (`docker run --rm -p $(RUN_PORT):8000 $(IMAGE) gunicorn -b 0.0.0.0:8000 "app:create_app()"`). gunicorn listens on 8000 inside the container; the host side is 20900 because this build shares its Docker host with other projects and is limited to host ports 20900-20999;
   - create `tests/unit/test_app.py`.
 - **Tests to write first** (test client, fake providers injected):
   - `POST /graphql` with a JSON `{ providers }` query returns 200 and data;

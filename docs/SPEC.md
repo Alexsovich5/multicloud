@@ -174,7 +174,7 @@ Inputs: `provider_type` ("aws" or "azure"), `name_prefix`, `instance_count`, `in
 
 ### Make targets
 
-`make build`, `make test` (depends on `build`; flake8 + unit tests in the period image), `make integration` (depends on `build`; compose stack + integration tests), `make run` (gunicorn on port 8000 without the simulators), `make tf-validate`, `make tf-plan`, `make k8s-validate`, `make up`, `make down`, `make smoke`.
+`make build`, `make test` (depends on `build`; flake8 + unit tests in the period image), `make integration` (depends on `build`; compose stack + integration tests), `make run` (gunicorn on container port 8000, published on host port `RUN_PORT`, default 20900, without the simulators), `make tf-validate`, `make tf-plan`, `make k8s-validate`, `make up`, `make down`, `make smoke`.
 
 ## Stack & pinned versions
 
