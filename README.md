@@ -16,6 +16,7 @@ Personal project, built to explore a single provisioning abstraction over AWS an
 
 - No GraphQL layer despite `graphene`/`flask-graphql` being declared as dependencies
 - Covers compute and resource groups only — no storage, networking or IAM
+- The Azure VM create payload has no `network_profile`/NIC, so it only works against the local fake ARM simulator; real ARM would reject it
 - No tests
 
 ## Built with
