@@ -1,61 +1,99 @@
 """
 AWS Cloud Provider
+
+EC2 instances via boto3. Setting ``endpoint_url`` in the config points the
+same code at an EC2-compatible endpoint such as moto.
 """
 
-import boto3
 import logging
+
+import boto3
+from botocore.exceptions import ClientError
+
+from providers.base import CloudProvider, normalize_instance
 
 logger = logging.getLogger('aws_provider')
 
+DEFAULT_REGION = 'us-east-1'
+DEFAULT_IMAGE = 'ami-12345678'
+DEFAULT_SIZE = 't2.micro'
+HIDDEN_STATES = ('terminated', 'shutting-down')
 
-class AWSProvider:
+
+class AWSProvider(CloudProvider):
     """AWS resource management."""
 
-    def __init__(self, config):
-        self.region = config.get('region', 'us-east-1')
-        self.ec2 = boto3.resource('ec2', region_name=self.region)
-        self.client = boto3.client('ec2', region_name=self.region)
+    name = 'aws'
+
+    def __init__(self, config, price_table=None, session=None):
+        config = config or {}
+        self.region = config.get('region', DEFAULT_REGION)
+        self.endpoint_url = config.get('endpoint_url')
+        self.default_image = config.get('default_image', DEFAULT_IMAGE)
+        self.default_size = config.get('default_size', DEFAULT_SIZE)
+        self.price_table = price_table
+        if session is None:
+            session = boto3.session.Session(region_name=self.region)
+        self.session = session
+        self.ec2 = session.resource('ec2', region_name=self.region,
+                                    endpoint_url=self.endpoint_url)
+        self.client = session.client('ec2', region_name=self.region,
+                                     endpoint_url=self.endpoint_url)
+
+    def _normalize(self, inst):
+        name = ''
+        for tag in (inst.tags or []):
+            if tag['Key'] == 'Name':
+                name = tag['Value']
+        return normalize_instance(
+            id=inst.id,
+            name=name,
+            provider=self.name,
+            type=inst.instance_type,
+            state=inst.state['Name'],
+            ip=inst.public_ip_address,
+            region=self.region,
+        )
 
     def list_instances(self):
-        """List all EC2 instances."""
-        instances = []
-        for inst in self.ec2.instances.all():
-            name = ''
-            for tag in (inst.tags or []):
-                if tag['Key'] == 'Name':
-                    name = tag['Value']
-            instances.append({
-                'id': inst.id,
-                'name': name,
-                'provider': 'aws',
-                'type': inst.instance_type,
-                'state': inst.state['Name'],
-                'ip': inst.public_ip_address,
-                'region': self.region
-            })
-        return instances
+        """List EC2 instances that are not terminated or shutting down."""
+        return [self._normalize(inst) for inst in self.ec2.instances.all()
+                if inst.state['Name'] not in HIDDEN_STATES]
 
     def create_instance(self, spec):
-        """Launch an EC2 instance."""
+        """Launch one EC2 instance tagged with ``spec['name']``."""
         instances = self.ec2.create_instances(
-            ImageId=spec.get('ami', 'ami-0c55b159cbfafe1f0'),
-            InstanceType=spec.get('type', 't3.medium'),
+            ImageId=spec.get('image', self.default_image),
+            InstanceType=spec.get('size', self.default_size),
             MinCount=1, MaxCount=1,
             TagSpecifications=[{
                 'ResourceType': 'instance',
                 'Tags': [{'Key': 'Name', 'Value': spec.get('name', 'multicloud')}]
             }]
         )
-        return {'id': instances[0].id, 'provider': 'aws'}
+        inst = instances[0]
+        inst.reload()
+        return self._normalize(inst)
 
     def destroy_instance(self, instance_id):
-        """Terminate an EC2 instance."""
+        """Terminate an EC2 instance; KeyError if it does not exist."""
+        try:
+            found = self.client.describe_instances(InstanceIds=[instance_id])
+        except ClientError as exc:
+            code = exc.response.get('Error', {}).get('Code', '')
+            if code.startswith('InvalidInstanceID'):
+                raise KeyError(instance_id)
+            raise
+        if not any(r.get('Instances') for r in found.get('Reservations', [])):
+            raise KeyError(instance_id)
         self.client.terminate_instances(InstanceIds=[instance_id])
         return True
 
     def get_monthly_cost(self):
-        """Estimate monthly cost (simplified)."""
-        count = len(list(self.ec2.instances.filter(
+        """Estimated monthly cost of running instances from the price table."""
+        if self.price_table is None:
+            return 0.0
+        sizes = [inst.instance_type for inst in self.ec2.instances.filter(
             Filters=[{'Name': 'instance-state-name', 'Values': ['running']}]
-        )))
-        return count * 50.0  # rough estimate
+        )]
+        return self.price_table.monthly(self.name, sizes)
