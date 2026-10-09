@@ -1,0 +1,4 @@
+hours_per_month: 730
+currency: USD
+aws:   {t2.micro: 0.0116, t2.medium: 0.0464, t3.medium: 0.0416, m4.large: 0.10}
+azure: {Standard_B1s: 0.0104, Standard_B2s: 0.0416, Standard_D2s_v3: 0.096}
