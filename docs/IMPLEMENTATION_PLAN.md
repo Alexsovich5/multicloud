@@ -303,7 +303,7 @@ Conventions used throughout:
     - add `azurerm_resource_group`, `azurerm_virtual_network` and `azurerm_subnet`;
     - call `module "aws_compute"` (with `azure_subnet_id = ""` and no Azure references) and `module "azure_compute"` (with `azure_subnet_id = "${azurerm_subnet.main.id}"`);
     - replace every bare reference with `"${...}"`.
-  - create `terraform/variables.tf` (`aws_endpoint` default `https://ec2.us-east-1.amazonaws.com`, `aws_access_key`/`aws_secret_key` default `testing`, `instance_count` default 2, `aws_instance_type` default `m4.large`, `azure_vm_size` default `Standard_B2s`).
+  - create `terraform/variables.tf` (`aws_endpoint` default `https://ec2.us-east-1.amazonaws.com`, `aws_access_key`/`aws_secret_key` default `testing`, `instance_count` default 2, `aws_instance_type` default `m4.large`, `azure_vm_size` default `Standard_B2s`, plus `azure_location` default `East US` and `ssh_public_key`, a placeholder key passed to the Azure module call, because `ssh_keys.key_data` is required).
   - create `terraform/outputs.tf`.
   - create `terraform/modules/compute/main.tf`, `variables.tf` and `outputs.tf`: a `data "aws_availability_zones" "available" {}` lookup, count-gated `aws_instance.this` (with `availability_zone = "${element(data.aws_availability_zones.available.names, count.index)}"`) and `azurerm_network_interface` + `azurerm_virtual_machine` (with `os_profile_linux_config` and `ssh_keys` from a variable), per SPEC.
   - modify `Makefile`: add a `tf-validate` target that runs `docker run --rm -v $(CURDIR)/terraform:/tf -w /tf hashicorp/terraform:0.11.10` with `init -backend=false -input=false`, then `validate`, then `fmt -check=true -diff=true`.

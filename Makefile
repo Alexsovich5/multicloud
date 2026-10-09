@@ -2,8 +2,9 @@ IMAGE ?= multicloud:dev
 COMPOSE ?= docker compose -p multicloud
 RUN_PORT ?= 20900
 API_PORT ?= 20901
+TERRAFORM ?= docker run --rm -v $(CURDIR)/terraform:/tf -w /tf hashicorp/terraform:0.11.10
 
-.PHONY: build test run up down integration smoke
+.PHONY: build test run up down integration smoke tf-validate
 
 build:
 	docker build -t $(IMAGE) .
@@ -29,3 +30,8 @@ smoke:
 	curl -sf -H 'Content-Type: application/json' \
 	  -d '{"query": "{ instances { id provider } costs { total } }"}' \
 	  http://localhost:$(API_PORT)/graphql
+
+tf-validate:
+	$(TERRAFORM) init -backend=false -input=false
+	$(TERRAFORM) validate
+	$(TERRAFORM) fmt -check=true -diff=true
