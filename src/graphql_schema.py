@@ -74,4 +74,50 @@ class Query(graphene.ObjectType):
         )
 
 
-schema = graphene.Schema(query=Query)
+class ProvisionInstance(graphene.Mutation):
+    """Create an instance on the named provider."""
+
+    class Arguments:
+        provider = graphene.String(required=True)
+        name = graphene.String(required=True)
+        size = graphene.String()
+        image = graphene.String()
+
+    Output = Instance
+
+    def mutate(root, info, provider, name, size=None, image=None):
+        spec = {'name': name}
+        if size is not None:
+            spec['size'] = size
+        if image is not None:
+            spec['image'] = image
+        return Instance.from_dict(root.provision(provider, spec))
+
+
+class DestroyResult(graphene.ObjectType):
+    """Outcome of a destroyInstance mutation."""
+
+    ok = graphene.Boolean(required=True)
+    id = graphene.String()
+
+
+class DestroyInstance(graphene.Mutation):
+    """Remove an instance from the named provider."""
+
+    class Arguments:
+        provider = graphene.String(required=True)
+        id = graphene.String(required=True)
+
+    Output = DestroyResult
+
+    def mutate(root, info, provider, id):
+        ok = root.destroy(provider, id)
+        return DestroyResult(ok=bool(ok), id=id)
+
+
+class Mutation(graphene.ObjectType):
+    provision_instance = ProvisionInstance.Field()
+    destroy_instance = DestroyInstance.Field()
+
+
+schema = graphene.Schema(query=Query, mutation=Mutation)
