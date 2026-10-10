@@ -59,3 +59,13 @@ def test_custom_hours_per_month(tmpdir):
     custom = PriceTable.from_file(str(path))
     assert custom.currency == 'EUR'
     assert custom.monthly('aws', ['t2.micro']) == 50.0
+
+
+def test_unpriced_lists_sizes_without_a_price(table):
+    assert table.unpriced('aws', ['t2.micro', 'x9.huge', 'x9.huge']) == [
+        'x9.huge', 'x9.huge']
+    assert table.unpriced('aws', ['t2.micro']) == []
+
+
+def test_unpriced_for_unknown_provider_is_every_size(table):
+    assert table.unpriced('gcp', ['n1-standard-1']) == ['n1-standard-1']

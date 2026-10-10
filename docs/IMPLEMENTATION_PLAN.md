@@ -397,6 +397,7 @@ Total: 16 tasks (T1–T16). Each task depends only on the tasks before it:
 - T8 and T9 come before T10, which comes before T11.
 - T11 provides the moto service that T13 uses.
 - T16 hardens the finished stack and touches the API, compose, Makefile and manifest from T10–T15.
+- T17 follows T16 and touches the providers, manager, schema, API, Makefile and docs.
 
 ## T16 — Security and hygiene hardening
 
@@ -426,4 +427,38 @@ Total: 16 tasks (T1–T16). Each task depends only on the tasks before it:
   Adds operator key auth, blocks cross-site form posts, masks
   unexpected errors, validates instance identifiers and publishes
   the stack on 127.0.0.1 only.
+  ```
+
+## T17 — Security and hygiene hardening
+
+- **Goal:** Second whole-repo review after T16, plus the post-batch required items that name this repository (operator auth/CSRF/network exposure, loopback-only published ports checked on the rendered compose file, secrets kept out of responses and logs).
+- **Found:**
+  - (major) Secrets in logs: graphql-core logs every resolver exception with its full text and traceback (`graphql.execution.executor`, `graphql.execution.utils`), so an endpoint URL with credentials in an SDK error reached the server log even though the HTTP response was masked. T16's test only looked at the `app` logger.
+  - (major) Error masking let any `ValueError` or `KeyError` through verbatim, including ones raised inside an SDK (requests `InvalidURL`, urllib3 parse errors, response-parser `KeyError`s), which can carry URLs, paths or credentials.
+  - (major) Missing data reported as healthy: an instance size without a list price was priced at 0.0 with only a log warning, so the API returned an understated cost total with nothing marking it incomplete; with no price table at all every cost was a silent 0.0.
+  - (major) The Azure provider treated every 404 on the VM listing as "resource group missing, no VMs", so a wrong subscription (`SubscriptionNotFound`) or other 404 showed an empty inventory and a 0.0 cost.
+  - (minor) The GraphiQL page pre-filled `?query=`/`?variables=` from the URL, so a link could stage a mutation for the operator to run with their key.
+  - (minor) Published ports were checked only on the raw compose YAML, not on the rendered file (post-batch item 23).
+  - (minor, hygiene) README said "2018-era stack" and "Docker images from the project's era"; the README Layout listed files without their directory names.
+  - Checked without change: every `/graphql` request (reads and mutations) already needs the operator key with a constant-time compare and no shipped default key, POSTs must be JSON (cross-origin form POST refused), PUT/DELETE/PATCH 405, failing auth returns a bare 401, compose and `make run` publish on 127.0.0.1 only, gunicorn binds 0.0.0.0 only inside its container, moto and fake ARM are not published, no shell/SQL interpreters or file paths take request input, YAML is read with `safe_load`.
+- **Changed:**
+  - `src/providers/base.py`: `RequestError(ValueError)` and `InstanceNotFound(KeyError)` (message `Unknown instance: <id>`); `CloudProvider.get_cost_estimate()` defaulting to `{'monthly': get_monthly_cost(), 'unpriced': []}`.
+  - `src/app.py`: only `RequestError`, `InstanceNotFound` and `GraphQLError` keep their message; a `WithholdErrorDetails` filter on the graphql-core loggers drops exception text and tracebacks (the executor's "error while resolving field X" line is kept).
+  - `src/cloud_manager.py`: raises `RequestError`; new `get_cost_report()` (per-provider `monthly`/`unpriced`, `total`, `complete`); `get_costs()` is built from it.
+  - `src/pricing.py`: `PriceTable.unpriced(provider, sizes)`.
+  - `src/providers/aws_provider.py`, `src/providers/azure_provider.py`: `get_cost_estimate()` (no price table means every instance unpriced), `InstanceNotFound` on unknown ids; Azure returns an empty listing only for `ResourceGroupNotFound`.
+  - `src/graphql_schema.py`: `ProviderCost.unpricedSizes: [String!]!`, `Costs.complete: Boolean!` (additive).
+  - `src/graphiql_page.py`: no pre-fill from the URL.
+  - create `scripts/check_published_ports.py` and `make compose-check` (`docker compose config` piped into it); `make test` lints `scripts`.
+  - `README.md` (Status, limitations, Running it, Tests, Layout with directory lines), `MANIFEST`, `docs/SPEC.md` (provider interface, CloudManager, price table, schema, error handling, API authentication, make targets, limitations).
+- **Tests written first:** `tests/unit/test_app.py` (SDK `ValueError`/`KeyError` with a sentinel secret masked in the response and absent from all captured logs, the existing `RuntimeError` case now checked against all logs, unknown instance and invalid name messages, GraphiQL not reading `location.search`); `tests/unit/test_pricing.py`, `tests/unit/test_aws_provider.py`, `tests/unit/test_azure_provider.py`, `tests/unit/test_cloud_manager.py`, `tests/unit/test_graphql_queries.py` (unpriced sizes reported, `complete` false, no price table means unpriced, `InstanceNotFound`, `RequestError`); `tests/unit/test_azure_provider.py` (`SubscriptionNotFound` and other 404s raise, `ResourceGroupNotFound` is empty); `tests/unit/test_container_config.py` (port checker on the repo compose file, short and long syntax, `0.0.0.0`/bare ports flagged, exit status, Makefile target); `tests/unit/test_readme.py` (Layout with directory lines, no era wording); `tests/integration/test_stack.py` (`complete` true for priced sizes, unknown instance message). `tests/unit/fakes.py` gains `unpriced_sizes` and raises `InstanceNotFound`.
+- **Acceptance:** `make test && make integration && make compose-check`, then `make up && make smoke`, a keyless and a cross-origin form POST to 127.0.0.1:20901 both return 401, then `docker compose -p multicloud down`.
+- **Commit:**
+  ```
+  Mask SDK errors in logs and flag unpriced or failed cost data
+
+  Keeps resolver exception text out of responses and graphql-core
+  logs, reports unpriced instances and incomplete cost totals,
+  stops treating Azure 404s as an empty inventory, and checks the
+  rendered compose file for loopback-only ports.
   ```

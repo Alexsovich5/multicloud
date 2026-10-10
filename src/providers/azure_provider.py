@@ -19,7 +19,7 @@ from azure.mgmt.resource import ResourceManagementClient
 from msrest.authentication import BasicTokenAuthentication
 from msrestazure.azure_exceptions import CloudError
 
-from providers.base import CloudProvider, normalize_instance
+from providers.base import CloudProvider, InstanceNotFound, normalize_instance
 
 logger = logging.getLogger('azure_provider')
 
@@ -39,6 +39,11 @@ CREDENTIAL_VARS = ('AZURE_CLIENT_ID', 'AZURE_CLIENT_SECRET', 'AZURE_TENANT_ID')
 def _status_code(error):
     response = getattr(error, 'response', None)
     return getattr(response, 'status_code', None)
+
+
+def _error_code(error):
+    """The ARM error code (e.g. ResourceGroupNotFound) of a CloudError."""
+    return getattr(getattr(error, 'error', None), 'error', None)
 
 
 class AzureProvider(CloudProvider):
@@ -93,10 +98,16 @@ class AzureProvider(CloudProvider):
         )
 
     def _vms(self):
+        """VMs in the resource group; [] only if ARM says the group is missing.
+
+        Any other error, including other 404s such as SubscriptionNotFound,
+        is raised so a failed listing is never reported as "no VMs".
+        """
         try:
             return list(self.compute.virtual_machines.list(self.resource_group))
         except CloudError as exc:
-            if _status_code(exc) == 404:
+            if (_status_code(exc) == 404
+                    and _error_code(exc) == 'ResourceGroupNotFound'):
                 return []
             raise
 
@@ -126,19 +137,27 @@ class AzureProvider(CloudProvider):
         return self._normalize(poller.result())
 
     def destroy_instance(self, instance_id):
-        """Delete a VM by name; KeyError if it does not exist."""
+        """Delete a VM by name; InstanceNotFound if it does not exist."""
         try:
             self.compute.virtual_machines.get(self.resource_group, instance_id)
         except CloudError as exc:
             if _status_code(exc) == 404:
-                raise KeyError(instance_id)
+                raise InstanceNotFound(instance_id)
             raise
         self.compute.virtual_machines.delete(self.resource_group, instance_id).result()
         return True
 
+    def get_cost_estimate(self):
+        """Monthly cost of the VMs and the sizes with no price.
+
+        Without a price table every VM is unpriced.
+        """
+        sizes = [vm.hardware_profile.vm_size for vm in self._vms() if vm.hardware_profile]
+        if self.price_table is None:
+            return {'monthly': 0.0, 'unpriced': sizes}
+        return {'monthly': self.price_table.monthly(self.name, sizes),
+                'unpriced': self.price_table.unpriced(self.name, sizes)}
+
     def get_monthly_cost(self):
         """Estimated monthly cost of the VMs from the price table."""
-        if self.price_table is None:
-            return 0.0
-        sizes = [vm.hardware_profile.vm_size for vm in self._vms() if vm.hardware_profile]
-        return self.price_table.monthly(self.name, sizes)
+        return self.get_cost_estimate()['monthly']

@@ -6,7 +6,7 @@ from moto import mock_ec2
 
 from pricing import PriceTable
 from providers.aws_provider import AWSProvider
-from providers.base import CloudProvider, INSTANCE_FIELDS
+from providers.base import CloudProvider, INSTANCE_FIELDS, InstanceNotFound
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 PRICING_FILE = os.path.join(REPO_ROOT, 'config', 'pricing.yaml')
@@ -102,3 +102,24 @@ def test_injected_session_is_used():
     provider = AWSProvider({'region': 'eu-west-1'}, session=session)
     assert provider.client.meta.region_name == 'eu-west-1'
     assert provider.region == 'eu-west-1'
+
+
+def test_cost_estimate_reports_unpriced_sizes(provider):
+    provider.create_instance({'name': 'a', 'size': 't2.micro'})
+    provider.create_instance({'name': 'b', 'size': 'x9.huge'})
+    assert provider.get_cost_estimate() == {
+        'monthly': round(0.0116 * 730, 2), 'unpriced': ['x9.huge']}
+
+
+def test_cost_estimate_without_price_table_marks_everything_unpriced():
+    with mock_ec2():
+        provider = AWSProvider(dict(CONFIG))
+        provider.create_instance({'name': 'a'})
+        assert provider.get_cost_estimate() == {
+            'monthly': 0.0, 'unpriced': ['t2.micro']}
+
+
+def test_destroy_unknown_id_raises_instance_not_found(provider):
+    with pytest.raises(InstanceNotFound) as err:
+        provider.destroy_instance('i-0123456789abcdef0')
+    assert str(err.value) == 'Unknown instance: i-0123456789abcdef0'

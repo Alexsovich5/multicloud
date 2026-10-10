@@ -133,3 +133,44 @@ def test_destroy_rejects_ids_unsafe_for_resource_paths(manager, resource_id):
     with pytest.raises(ValueError):
         manager.destroy('azure', resource_id)
     assert [i['id'] for i in manager.list_resources()] == [created['id']]
+
+
+def test_cost_report_is_complete_when_every_instance_is_priced(manager):
+    manager.provision('aws', {'name': 'a1'})
+    report = manager.get_cost_report()
+    assert report['complete'] is True
+    assert report['total'] == 10.0
+    assert report['providers'] == [
+        {'provider': 'aws', 'monthly': 10.0, 'unpriced': []},
+        {'provider': 'azure', 'monthly': 0.0, 'unpriced': []},
+    ]
+
+
+def test_cost_report_flags_unpriced_instances():
+    aws = FakeProvider('aws', cost_per_instance=10.0, unpriced_sizes=['x9.huge'])
+    manager = CloudManager({}, providers={'aws': aws})
+    manager.provision('aws', {'name': 'a1', 'size': 't2.micro'})
+    manager.provision('aws', {'name': 'a2', 'size': 'x9.huge'})
+    report = manager.get_cost_report()
+    assert report['complete'] is False
+    assert report['providers'] == [
+        {'provider': 'aws', 'monthly': 10.0, 'unpriced': ['x9.huge']}]
+    assert manager.get_costs() == {'aws': 10.0, 'total': 10.0}
+
+
+def test_base_cost_estimate_wraps_get_monthly_cost():
+    class Flat(CloudProvider):
+        def get_monthly_cost(self):
+            return 3.5
+
+    assert Flat().get_cost_estimate() == {'monthly': 3.5, 'unpriced': []}
+
+
+def test_request_errors_are_value_errors():
+    from providers.base import RequestError
+    assert issubclass(RequestError, ValueError)
+    manager = CloudManager({}, providers={})
+    with pytest.raises(RequestError):
+        manager.list_resources('gcp')
+    with pytest.raises(RequestError):
+        manager.provision('gcp', {'name': 'x'})

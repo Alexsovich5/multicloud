@@ -75,3 +75,27 @@ def test_costs_match_cloud_manager(manager):
     ]
     assert costs['total'] == expected['total'] == 27.0
     assert costs['currency'] == 'USD'
+
+
+def test_costs_report_completeness(manager):
+    result = run(manager, '{ costs { complete breakdown { provider unpricedSizes } } }')
+    assert result.errors is None
+    assert result.data['costs'] == {
+        'complete': True,
+        'breakdown': [{'provider': 'aws', 'unpricedSizes': []},
+                      {'provider': 'azure', 'unpricedSizes': []}],
+    }
+
+
+def test_costs_flag_unpriced_sizes():
+    aws = FakeProvider('aws', cost_per_instance=12.5, unpriced_sizes=['x9.huge'])
+    mgr = CloudManager({}, providers={'aws': aws})
+    mgr.provision('aws', {'name': 'a1', 'size': 'x9.huge'})
+    result = run(mgr, '{ costs { total complete breakdown { provider monthly '
+                      'unpricedSizes } } }')
+    assert result.errors is None
+    assert result.data['costs'] == {
+        'total': 0.0, 'complete': False,
+        'breakdown': [{'provider': 'aws', 'monthly': 0.0,
+                       'unpricedSizes': ['x9.huge']}],
+    }

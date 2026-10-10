@@ -4,7 +4,9 @@ Static GraphiQL page served on ``GET /graphql`` for browsers.
 Nothing from the request is rendered into the page and no query runs while
 serving it. The page asks for the API key once, keeps it in sessionStorage
 for the tab, and sends it as ``Authorization: Bearer <key>`` on every
-GraphQL request. A 401 answer clears the stored key. The GraphiQL and React
+GraphQL request. A 401 answer clears the stored key. The editor never
+pre-fills a query from the URL, so a link cannot stage a mutation for the
+operator to run. The GraphiQL and React
 files come from jsdelivr with Subresource Integrity hashes.
 """
 
@@ -61,13 +63,8 @@ PAGE = '''<!DOCTYPE html>
       });
     }
 
-    var search = new URLSearchParams(window.location.search);
     ReactDOM.render(
-      React.createElement(GraphiQL, {
-        fetcher: graphQLFetcher,
-        query: search.get('query') || undefined,
-        variables: search.get('variables') || undefined
-      }),
+      React.createElement(GraphiQL, {fetcher: graphQLFetcher}),
       document.body
     );
   </script>

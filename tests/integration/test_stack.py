@@ -22,7 +22,8 @@ mutation($provider: String!, $id: String!) {
 
 INSTANCES = '{ instances { id name provider } }'
 
-COSTS = '{ costs { total currency breakdown { provider monthly } } }'
+COSTS = ('{ costs { total currency complete '
+         'breakdown { provider monthly unpricedSizes } } }')
 
 
 @pytest.fixture(scope='module')
@@ -64,6 +65,18 @@ def test_costs_total_is_sum_of_breakdown(gql, created):
     assert breakdown['azure'] > 0
     assert costs['total'] == pytest.approx(sum(breakdown.values()))
     assert costs['total'] > 0
+    assert costs['complete'] is True
+    assert all(b['unpricedSizes'] == [] for b in costs['breakdown'])
+
+
+def test_destroy_unknown_instance_names_only_the_id(api_url, api_key):
+    resp = requests.post(
+        api_url + '/graphql',
+        json={'query': 'mutation { destroyInstance(provider: "azure", '
+                       'id: "no-such-vm") { ok } }'},
+        headers={'Authorization': 'Bearer ' + api_key}, timeout=30)
+    assert resp.status_code == 200
+    assert resp.json()['errors'][0]['message'] == 'Unknown instance: no-such-vm'
 
 
 def test_destroy_removes_both(gql, created):

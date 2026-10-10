@@ -10,7 +10,7 @@ import logging
 import boto3
 from botocore.exceptions import ClientError
 
-from providers.base import CloudProvider, normalize_instance
+from providers.base import CloudProvider, InstanceNotFound, normalize_instance
 
 logger = logging.getLogger('aws_provider')
 
@@ -76,24 +76,32 @@ class AWSProvider(CloudProvider):
         return self._normalize(inst)
 
     def destroy_instance(self, instance_id):
-        """Terminate an EC2 instance; KeyError if it does not exist."""
+        """Terminate an EC2 instance; InstanceNotFound if it does not exist."""
         try:
             found = self.client.describe_instances(InstanceIds=[instance_id])
         except ClientError as exc:
             code = exc.response.get('Error', {}).get('Code', '')
             if code.startswith('InvalidInstanceID'):
-                raise KeyError(instance_id)
+                raise InstanceNotFound(instance_id)
             raise
         if not any(r.get('Instances') for r in found.get('Reservations', [])):
-            raise KeyError(instance_id)
+            raise InstanceNotFound(instance_id)
         self.client.terminate_instances(InstanceIds=[instance_id])
         return True
 
-    def get_monthly_cost(self):
-        """Estimated monthly cost of running instances from the price table."""
-        if self.price_table is None:
-            return 0.0
+    def get_cost_estimate(self):
+        """Monthly cost of running instances and the sizes with no price.
+
+        Without a price table every running instance is unpriced.
+        """
         sizes = [inst.instance_type for inst in self.ec2.instances.filter(
             Filters=[{'Name': 'instance-state-name', 'Values': ['running']}]
         )]
-        return self.price_table.monthly(self.name, sizes)
+        if self.price_table is None:
+            return {'monthly': 0.0, 'unpriced': sizes}
+        return {'monthly': self.price_table.monthly(self.name, sizes),
+                'unpriced': self.price_table.unpriced(self.name, sizes)}
+
+    def get_monthly_cost(self):
+        """Estimated monthly cost of running instances from the price table."""
+        return self.get_cost_estimate()['monthly']

@@ -3,6 +3,7 @@ Checks on the compose file, Makefile and Dockerfile that keep the stack
 loopback-only and keep secrets and unauthenticated package sources out.
 """
 
+import io
 import os
 import re
 
@@ -74,3 +75,48 @@ UNAUTHENTICATED_APT = re.compile(
 @pytest.mark.parametrize('path', ['Dockerfile', 'docker-compose.yml', 'Makefile'])
 def test_no_unauthenticated_or_plain_http_package_sources(path):
     assert not UNAUTHENTICATED_APT.search(_read(path)), path
+
+
+def test_port_checker_accepts_the_repo_compose_file(compose):
+    from scripts.check_published_ports import non_loopback_ports
+    assert non_loopback_ports(compose) == []
+
+
+@pytest.mark.parametrize('port', [
+    '20901:8000',
+    '0.0.0.0:20901:8000',
+    20901,
+    '8000',
+    {'target': 8000, 'published': 20901},
+    {'target': 8000, 'published': '20901', 'host_ip': '0.0.0.0'},
+])
+def test_port_checker_flags_ports_open_on_every_interface(port):
+    from scripts.check_published_ports import non_loopback_ports
+    compose = {'services': {'api': {'ports': [port]}}}
+    assert non_loopback_ports(compose) == [('api', port)]
+
+
+@pytest.mark.parametrize('port', [
+    '127.0.0.1:20901:8000',
+    {'target': 8000, 'published': '20901', 'host_ip': '127.0.0.1',
+     'protocol': 'tcp', 'mode': 'ingress'},
+])
+def test_port_checker_accepts_loopback_ports(port):
+    from scripts.check_published_ports import non_loopback_ports
+    compose = {'services': {'api': {'ports': [port]}}}
+    assert non_loopback_ports(compose) == []
+
+
+def test_port_checker_main_exit_status(capsys):
+    from scripts.check_published_ports import main
+    good = io.StringIO('services:\n  api:\n    ports: ["127.0.0.1:20901:8000"]\n')
+    bad = io.StringIO('services:\n  api:\n    ports: ["20901:8000"]\n')
+    assert main(good) == 0
+    assert main(bad) == 1
+    assert 'api' in capsys.readouterr().err
+
+
+def test_makefile_checks_the_rendered_compose_file():
+    makefile = _read('Makefile')
+    assert re.search(r'^compose-check:', makefile, re.M)
+    assert re.search(r'\$\(COMPOSE\) config \|.*check_published_ports', makefile)

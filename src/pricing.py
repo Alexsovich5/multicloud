@@ -42,6 +42,11 @@ class PriceTable(object):
             return 0.0
         return float(sizes[size])
 
+    def unpriced(self, provider, sizes):
+        """The entries of ``sizes`` that have no price in the table."""
+        known = self.prices.get(provider) or {}
+        return [size for size in sizes if size not in known]
+
     def monthly(self, provider, sizes):
         """Monthly cost of one running instance per entry in ``sizes``."""
         hourly_total = 0.0

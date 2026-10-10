@@ -1,11 +1,13 @@
+import json
 import os
 
 import pytest
 import requests
+from msrestazure.azure_exceptions import CloudError
 
 from pricing import PriceTable
 from providers.azure_provider import AzureProvider
-from providers.base import CloudProvider, INSTANCE_FIELDS
+from providers.base import CloudProvider, INSTANCE_FIELDS, InstanceNotFound
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 PRICING_FILE = os.path.join(REPO_ROOT, 'config', 'pricing.yaml')
@@ -108,3 +110,48 @@ def test_missing_credentials_raise_value_error(monkeypatch):
     message = str(exc.value)
     for var in CREDENTIAL_VARS:
         assert var in message
+
+
+def test_cost_estimate_reports_unpriced_sizes(provider):
+    provider.create_instance({'name': 'web1', 'size': 'Standard_B2s'})
+    provider.create_instance({'name': 'web2', 'size': 'Standard_Z9'})
+    assert provider.get_cost_estimate() == {
+        'monthly': round(0.0416 * 730, 2), 'unpriced': ['Standard_Z9']}
+
+
+def test_destroy_unknown_name_raises_instance_not_found(provider):
+    with pytest.raises(InstanceNotFound) as err:
+        provider.destroy_instance('missing')
+    assert str(err.value) == 'Unknown instance: missing'
+
+
+def _cloud_error(status, code):
+    response = requests.Response()
+    response.status_code = status
+    response.reason = 'Not Found'
+    response.headers['Content-Type'] = 'application/json'
+    response._content = json.dumps(
+        {'error': {'code': code, 'message': code + ' message'}}).encode('utf-8')
+    return CloudError(response)
+
+
+@pytest.mark.parametrize('code', ['SubscriptionNotFound', 'InvalidAuthenticationToken',
+                                  'NotFound'])
+def test_other_404s_are_not_an_empty_resource_group(provider, monkeypatch, code):
+    def failing_list(operations, resource_group, **kwargs):
+        raise _cloud_error(404, code)
+
+    # virtual_machines is a property that builds a new operations object.
+    monkeypatch.setattr(type(provider.compute.virtual_machines), 'list', failing_list)
+    with pytest.raises(CloudError):
+        provider.list_instances()
+    with pytest.raises(CloudError):
+        provider.get_monthly_cost()
+
+
+def test_missing_resource_group_404_is_an_empty_list(provider, monkeypatch):
+    def missing_group(operations, resource_group, **kwargs):
+        raise _cloud_error(404, 'ResourceGroupNotFound')
+
+    monkeypatch.setattr(type(provider.compute.virtual_machines), 'list', missing_group)
+    assert provider.list_instances() == []

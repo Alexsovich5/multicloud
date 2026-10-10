@@ -36,6 +36,10 @@ class ProviderCost(graphene.ObjectType):
 
     provider = graphene.String(required=True)
     monthly = graphene.Float(required=True)
+    unpriced_sizes = graphene.List(
+        graphene.NonNull(graphene.String), required=True,
+        description='Sizes of counted instances with no list price; '
+                    'they add nothing to monthly.')
 
 
 class Costs(graphene.ObjectType):
@@ -44,6 +48,9 @@ class Costs(graphene.ObjectType):
     breakdown = graphene.List(graphene.NonNull(ProviderCost), required=True)
     total = graphene.Float(required=True)
     currency = graphene.String(required=True)
+    complete = graphene.Boolean(
+        required=True,
+        description='False if any instance is unpriced, so total understates the cost.')
 
 
 class Query(graphene.ObjectType):
@@ -62,15 +69,17 @@ class Query(graphene.ObjectType):
         return [Instance.from_dict(i) for i in root.list_resources(provider)]
 
     def resolve_costs(root, info):
-        costs = root.get_costs()
+        report = root.get_cost_report()
         breakdown = [
-            ProviderCost(provider=name, monthly=costs[name])
-            for name in root.provider_names()
+            ProviderCost(provider=p['provider'], monthly=p['monthly'],
+                         unpriced_sizes=p['unpriced'])
+            for p in report['providers']
         ]
         return Costs(
             breakdown=breakdown,
-            total=costs['total'],
+            total=report['total'],
             currency=root.currency,
+            complete=report['complete'],
         )
 
 

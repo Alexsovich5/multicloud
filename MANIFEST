@@ -12,6 +12,7 @@ docs/SPEC.md
 k8s/deployment.yaml
 requirements-dev.txt
 requirements.txt
+scripts/check_published_ports.py
 setup.cfg
 simulators/__init__.py
 simulators/fake_arm.py

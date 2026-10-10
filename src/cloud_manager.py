@@ -11,6 +11,7 @@ from config import load_config, resolve_path
 from pricing import DEFAULT_CURRENCY, PriceTable
 from providers.aws_provider import AWSProvider
 from providers.azure_provider import AzureProvider
+from providers.base import RequestError
 
 logger = logging.getLogger('cloud_manager')
 
@@ -20,10 +21,10 @@ IDENTIFIER = re.compile(r'[A-Za-z0-9][A-Za-z0-9._-]{0,63}\Z')
 
 
 def check_identifier(value, what):
-    """Raise ValueError unless ``value`` is a plain resource identifier."""
+    """Raise RequestError unless ``value`` is a plain resource identifier."""
     if not isinstance(value, str) or not IDENTIFIER.match(value):
-        raise ValueError('Invalid %s: use 1-64 letters, digits, ".", "_" or "-", '
-                         'starting with a letter or digit' % what)
+        raise RequestError('Invalid %s: use 1-64 letters, digits, ".", "_" or "-", '
+                           'starting with a letter or digit' % what)
     return value
 
 
@@ -55,7 +56,7 @@ class CloudManager:
 
     def _get(self, provider):
         if provider not in self.providers:
-            raise ValueError(f"Unknown provider: {provider}")
+            raise RequestError(f"Unknown provider: {provider}")
         return self.providers[provider]
 
     def list_resources(self, provider=None):
@@ -70,16 +71,35 @@ class CloudManager:
         """Provision resources on a specific cloud."""
         target = self._get(provider)
         if not spec.get('name'):
-            raise ValueError("spec['name'] is required")
+            raise RequestError("spec['name'] is required")
         check_identifier(spec['name'], 'instance name')
         return target.create_instance(spec)
 
+    def get_cost_report(self):
+        """Per-provider monthly cost, the total, and whether it is complete.
+
+        ``complete`` is False when any counted instance has no list price,
+        so the total understates the real cost.
+        """
+        providers = []
+        for name, provider in self.providers.items():
+            estimate = provider.get_cost_estimate()
+            providers.append({
+                'provider': name,
+                'monthly': round(float(estimate['monthly']), 2),
+                'unpriced': list(estimate['unpriced']),
+            })
+        return {
+            'providers': providers,
+            'total': round(sum(p['monthly'] for p in providers), 2),
+            'complete': not any(p['unpriced'] for p in providers),
+        }
+
     def get_costs(self):
         """Aggregate costs across all providers."""
-        costs = {}
-        for name, provider in self.providers.items():
-            costs[name] = round(float(provider.get_monthly_cost()), 2)
-        costs['total'] = round(sum(costs.values()), 2)
+        report = self.get_cost_report()
+        costs = dict((p['provider'], p['monthly']) for p in report['providers'])
+        costs['total'] = report['total']
         return costs
 
     def destroy(self, provider, resource_id):

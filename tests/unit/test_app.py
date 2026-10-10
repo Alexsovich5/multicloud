@@ -231,6 +231,8 @@ def test_unexpected_errors_are_masked_in_responses(caplog):
                if r.name == 'app')
     assert not any(SENTINEL in r.getMessage() for r in caplog.records
                    if r.name == 'app')
+    assert SENTINEL not in caplog.text
+    assert '/app/src' not in caplog.text
 
 
 def test_expected_errors_keep_their_message(client):
@@ -250,3 +252,51 @@ def test_the_key_is_never_echoed_or_logged(client, caplog):
         assert API_KEY not in text
     assert SENTINEL not in caplog.text
     assert API_KEY not in caplog.text
+
+
+class LeakyValueErrorProvider(FakeProvider):
+    """An SDK ValueError (e.g. requests InvalidURL) carrying a secret URL."""
+
+    def list_instances(self):
+        raise ValueError('Invalid URL http://admin:%s@moto:5000/' % SENTINEL)
+
+
+class LeakyKeyErrorProvider(FakeProvider):
+    """A KeyError from inside an SDK response parser."""
+
+    def list_instances(self):
+        raise KeyError('/app/src/x.py ' + SENTINEL)
+
+
+@pytest.mark.parametrize('provider_class', [LeakyValueErrorProvider,
+                                            LeakyKeyErrorProvider])
+def test_sdk_value_and_key_errors_are_masked_too(provider_class, caplog):
+    manager = CloudManager({}, providers={'aws': provider_class('aws')})
+    client = create_app(manager, api_key=API_KEY).test_client()
+    with caplog.at_level(logging.DEBUG):
+        response = post_query(client, '{ instances { id } }')
+    text = response.get_data(as_text=True)
+    assert SENTINEL not in text
+    assert json.loads(text)['errors'][0]['message'] == 'Internal server error'
+    assert SENTINEL not in caplog.text
+
+
+def test_unknown_instance_error_names_only_the_id(client):
+    response = post_query(client, 'mutation { destroyInstance(provider: "aws", '
+                                  'id: "aws-9") { ok } }')
+    payload = json.loads(response.get_data(as_text=True))
+    assert payload['errors'][0]['message'] == 'Unknown instance: aws-9'
+
+
+def test_invalid_name_error_is_returned(client):
+    response = post_query(client, 'mutation { provisionInstance(provider: "aws", '
+                                  'name: "../x") { id } }')
+    payload = json.loads(response.get_data(as_text=True))
+    assert payload['errors'][0]['message'].startswith('Invalid instance name')
+
+
+def test_graphiql_page_does_not_prefill_queries_from_the_url(client):
+    text = client.get('/graphql', headers={'Accept': 'text/html'}).get_data(
+        as_text=True)
+    assert 'location.search' not in text
+    assert 'URLSearchParams' not in text

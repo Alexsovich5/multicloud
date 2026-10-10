@@ -47,7 +47,17 @@ def _layout_block(text):
 
 
 def _render_tree(paths):
-    return ["  " * p.count("/") + p.rsplit("/", 1)[-1] for p in sorted(paths)]
+    """Indented tree: each directory once as ``name/``, then its files."""
+    lines, seen = [], set()
+    for path in sorted(paths):
+        parts = path.split("/")
+        for depth in range(len(parts) - 1):
+            directory = "/".join(parts[:depth + 1])
+            if directory not in seen:
+                seen.add(directory)
+                lines.append("  " * depth + parts[depth] + "/")
+        lines.append("  " * (len(parts) - 1) + parts[-1])
+    return lines
 
 
 def test_backticked_paths_exist(readme):
@@ -82,6 +92,16 @@ def test_no_role_or_organisation_lines(readme):
         plain = line.replace("**", "").replace("__", "").strip()
         plain = re.sub(r"^[-*]\s+", "", plain)
         assert not re.match(r"(Role:|Organization:|Developed during)", plain), line
+
+
+def test_render_tree_lists_each_directory_once(manifest):
+    assert "README.md" in manifest and "docs/SPEC.md" in manifest
+    assert "config/" in _render_tree(manifest)
+    assert "  multicloud.yml" in _render_tree(manifest)
+
+
+def test_no_era_wording(readme):
+    assert not re.search(r"\b(19|20)\d\d-era\b|\bera\b", readme, flags=re.I)
 
 
 def test_no_percentage_metrics(readme):

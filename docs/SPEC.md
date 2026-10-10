@@ -89,9 +89,11 @@ class CloudProvider(object):
     name = None                                 # "aws" | "azure"
     def list_instances(self): ...               # -> [instance dict], terminated/deleted excluded
     def create_instance(self, spec): ...        # spec: {"name": str, "size": str?, "image": str?} -> instance dict
-    def destroy_instance(self, instance_id): ...# -> True; raises KeyError if unknown
+    def destroy_instance(self, instance_id): ...# -> True; raises InstanceNotFound (a KeyError) if unknown
     def get_monthly_cost(self): ...             # -> float (USD, 2 dp)
+    def get_cost_estimate(self): ...            # -> {"monthly": float, "unpriced": [size]}; default wraps get_monthly_cost
 ```
+`RequestError` (a `ValueError`) and `InstanceNotFound` (a `KeyError`, message `Unknown instance: <id>`) are defined here; they are the only resolver exceptions whose message the API returns.
 
 ### CloudManager (`src/cloud_manager.py`)
 
@@ -99,8 +101,9 @@ class CloudProvider(object):
 CloudManager(config, providers=None)          # providers: optional {name: CloudProvider} for injection
 .provider_names() -> [str]
 .list_resources(provider=None) -> [instance]
-.provision(provider, spec) -> instance        # ValueError on unknown provider / missing spec["name"]
-.destroy(provider, resource_id) -> bool       # ValueError on unknown provider
+.provision(provider, spec) -> instance        # RequestError on unknown provider / missing or invalid spec["name"]
+.destroy(provider, resource_id) -> bool       # RequestError on unknown provider / invalid id
+.get_cost_report() -> {"providers": [{"provider", "monthly", "unpriced"}], "total": float, "complete": bool}
 .get_costs() -> {"aws": float, "azure": float, "total": float}
 .currency -> str                              # PriceTable currency, "USD" when no price table is wired
 build_manager(config_path=None) -> CloudManager   # reads YAML + env overrides
@@ -131,15 +134,15 @@ currency: USD
 aws:   {t2.micro: 0.0116, t2.medium: 0.0464, t3.medium: 0.0416, m4.large: 0.10}
 azure: {Standard_B1s: 0.0104, Standard_B2s: 0.0416, Standard_D2s_v3: 0.096}
 ```
-Values are illustrative Linux on-demand list prices. Unknown sizes are priced at 0.0 and logged as a warning.
+Values are illustrative Linux on-demand list prices. Unknown sizes are priced at 0.0 and logged as a warning, and are reported per provider as `unpricedSizes` with `costs.complete = false`, so an understated total is visible to the caller. With no price table every instance is unpriced.
 
 ### GraphQL schema
 
 ```graphql
 type Instance { id: String!, name: String, provider: String!, type: String, state: String, ip: String, region: String }
-type ProviderCost { provider: String!, monthly: Float! }
+type ProviderCost { provider: String!, monthly: Float!, unpricedSizes: [String!]! }
 type DestroyResult { ok: Boolean!, id: String }
-type Costs { breakdown: [ProviderCost!]!, total: Float!, currency: String! }
+type Costs { breakdown: [ProviderCost!]!, total: Float!, currency: String!, complete: Boolean! }
 type Query {
   providers: [String!]!
   instances(provider: String): [Instance!]!
@@ -150,13 +153,15 @@ type Mutation {
   destroyInstance(provider: String!, id: String!): DestroyResult
 }
 ```
-An unknown provider returns a GraphQL error (`errors[0].message = "Unknown provider: gcp"`). HTTP: `POST /graphql` (JSON `{query, variables}`), `GET /graphql?query=...` (queries only), `GET /graphql` with `Accept: text/html` (static GraphiQL page), `GET /healthz` → `{"status":"ok","providers":[...]}`. Instance names and ids must be 1-64 characters of letters, digits, `.`, `_` or `-`, starting with a letter or digit; anything else is a `ValueError` before any cloud call. Resolver errors other than `ValueError`/`KeyError`/`GraphQLError` are returned as `"Internal server error"` and logged by exception type only.
+An unknown provider returns a GraphQL error (`errors[0].message = "Unknown provider: gcp"`). HTTP: `POST /graphql` (JSON `{query, variables}`), `GET /graphql?query=...` (queries only), `GET /graphql` with `Accept: text/html` (static GraphiQL page), `GET /healthz` → `{"status":"ok","providers":[...]}`. Instance names and ids must be 1-64 characters of letters, digits, `.`, `_` or `-`, starting with a letter or digit; anything else is a `RequestError` before any cloud call. Resolver errors other than `RequestError`/`InstanceNotFound`/`GraphQLError` (including plain `ValueError`/`KeyError` from an SDK) are returned as `"Internal server error"` and logged by exception type only; a logging filter strips exception text and tracebacks from graphql-core's own error log records. The Azure provider treats only a `ResourceGroupNotFound` 404 as an empty listing; every other error is raised.
 
 ### API authentication
 
 - Every `/graphql` request except the GraphiQL HTML page needs `Authorization: Bearer <key>`. The key is compared with `hmac.compare_digest`. A missing or wrong key gets `401` with `{"errors":[{"message":"Unauthorized"}]}` and `WWW-Authenticate: Bearer`, nothing else.
 - `POST` bodies must be `application/json` (`415` otherwise), so a cross-site HTML form (urlencoded, multipart or text/plain) cannot reach a mutation, and the API sets no CORS headers. `PUT`/`DELETE`/`PATCH` get `405`.
 - The key comes from `MC_API_KEY`, or from the file named by `MC_API_KEY_FILE` (the image sets `/run/multicloud/api_key`). A missing file is created with a random 64-hex-character key, mode 0600, written to a temp file and hard-linked into place so concurrent workers agree on one key. With neither set, `create_app()` raises and the server does not start. Keys shorter than 16 characters are rejected. No key is stored in the repository.
+- The GraphiQL page never pre-fills a query or variables from the URL, so a link cannot stage a mutation for the operator to run.
+- `make compose-check` renders the compose file with `docker compose config` and fails if any port is published beyond 127.0.0.1 (`scripts/check_published_ports.py`, also unit-tested against the repository's compose file).
 - Compose keeps the key file in the `api-key` volume (`make api-key` prints it, `make smoke` pipes it to curl on stdin). The Kubernetes manifest reads `MC_API_KEY` from the Secret `multicloud-api-key` (key `api-key`), created outside the manifest.
 - The GraphiQL page is static: nothing from the request is rendered into it and no query runs while serving it. It asks for the key once, keeps it in `sessionStorage` and sends it as a Bearer header; GraphiQL and React load from jsdelivr with Subresource Integrity hashes. All responses carry `X-Frame-Options: DENY` and `X-Content-Type-Options: nosniff`.
 - Published ports (compose and `make run`) are bound to 127.0.0.1. The fake ARM server listens on `HOST` (default 127.0.0.1; compose sets 0.0.0.0 inside its container and does not publish it).
@@ -183,7 +188,7 @@ Inputs: `provider_type` ("aws" or "azure"), `name_prefix`, `instance_count`, `in
 
 ### Make targets
 
-`make build`, `make test` (depends on `build`; flake8 + unit tests in the period image), `make integration` (depends on `build`; compose stack + integration tests), `make run` (gunicorn on container port 8000, published on 127.0.0.1 port `RUN_PORT`, default 20900, without the simulators), `make tf-validate`, `make tf-plan`, `make k8s-validate`, `make up`, `make down`, `make smoke` (sends the stack's API key), `make api-key` (prints it).
+`make build`, `make test` (depends on `build`; flake8 + unit tests in the period image), `make integration` (depends on `build`; compose stack + integration tests), `make run` (gunicorn on container port 8000, published on 127.0.0.1 port `RUN_PORT`, default 20900, without the simulators), `make tf-validate`, `make tf-plan`, `make k8s-validate`, `make up`, `make down`, `make smoke` (sends the stack's API key), `make api-key` (prints it), `make compose-check` (rendered compose file has loopback-only ports).
 
 ## Stack & pinned versions
 
@@ -302,5 +307,5 @@ No files are deleted. The README also listed `src/graphql_schema.py`, `terraform
 - `terraform init`, `make tf-*` and `make k8s-validate` need network access to download providers and schemas. The unit tests make no outbound calls, but building the image (which `make test` does first) needs PyPI access.
 - The Kubernetes manifest is schema-validated but has never been deployed to a cluster.
 - The API is protected by one shared operator key: no users, roles or TLS. It keeps no state of its own. State lives in the simulators and is lost when they restart.
-- An instance size missing from the price table is priced at 0.0 with a log warning, so the cost total can understate the real cost.
+- An instance size missing from the price table is priced at 0.0. The API flags it (`complete: false`, `unpricedSizes`), but the total is then only a lower bound.
 - pytest is held at 3.5.1 because atomicwrites, which later pytests need, carries a 2022 re-upload date on PyPI and fails the period check.

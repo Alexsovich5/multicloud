@@ -23,13 +23,45 @@ from auth import key_matches, load_api_key
 from cloud_manager import build_manager
 from graphiql_page import PAGE as GRAPHIQL_PAGE
 from graphql_schema import schema
+from providers.base import InstanceNotFound, RequestError
 
 logger = logging.getLogger('app')
 
 # Resolver errors whose message is meant for the caller (unknown provider,
-# bad name, unknown instance). Anything else is reported as an internal error.
-EXPOSED_ERRORS = (ValueError, KeyError, GraphQLError)
+# bad name, unknown instance). Anything else, including plain ValueError and
+# KeyError raised inside an SDK, is reported as an internal error.
+EXPOSED_ERRORS = (RequestError, InstanceNotFound, GraphQLError)
 INTERNAL_ERROR = 'Internal server error'
+
+# graphql-core logs every resolver exception with its full text and
+# traceback, which can carry endpoint URLs with credentials or tokens.
+GRAPHQL_LOGGERS = ('graphql.execution.executor', 'graphql.execution.utils',
+                   'graphql.errors')
+
+
+class WithholdErrorDetails(logging.Filter):
+    """Strip exception text and tracebacks from graphql-core log records.
+
+    The executor's own message only names the field and is kept; records
+    whose message is a formatted traceback are replaced. ``safe_format_error``
+    still logs the exception type and path under the ``app`` logger.
+    """
+
+    def filter(self, record):
+        if record.name != 'graphql.execution.executor':
+            record.msg = 'GraphQL error (details withheld)'
+            record.args = ()
+        record.exc_info = None
+        record.exc_text = None
+        record.stack_info = None
+        return True
+
+
+def _install_log_filter():
+    for name in GRAPHQL_LOGGERS:
+        target = logging.getLogger(name)
+        if not any(isinstance(f, WithholdErrorDetails) for f in target.filters):
+            target.addFilter(WithholdErrorDetails())
 
 
 def safe_format_error(error):
@@ -76,6 +108,7 @@ def create_app(manager=None, api_key=None):
     """
     if api_key is None:
         api_key = load_api_key()
+    _install_log_filter()
     if manager is None:
         manager = build_manager()
 

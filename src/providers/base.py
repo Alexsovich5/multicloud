@@ -5,6 +5,21 @@ Common interface implemented by every cloud provider.
 INSTANCE_FIELDS = ('id', 'name', 'provider', 'type', 'state', 'ip', 'region')
 
 
+class RequestError(ValueError):
+    """The caller asked for something invalid; the message is safe to return."""
+
+
+class InstanceNotFound(KeyError):
+    """No instance with this id exists; the message names only the id."""
+
+    def __init__(self, instance_id):
+        super(InstanceNotFound, self).__init__(instance_id)
+        self.instance_id = instance_id
+
+    def __str__(self):
+        return 'Unknown instance: %s' % self.instance_id
+
+
 def normalize_instance(**fields):
     """Return an instance dict with exactly the normalized keys.
 
@@ -42,3 +57,12 @@ class CloudProvider(object):
     def get_monthly_cost(self):
         """Return the estimated monthly cost as a float."""
         raise NotImplementedError
+
+    def get_cost_estimate(self):
+        """Return ``{'monthly': float, 'unpriced': [size, ...]}``.
+
+        ``unpriced`` lists the sizes of counted instances that have no list
+        price, so a caller can tell a complete estimate from an understated
+        one. Providers that price every instance can keep this default.
+        """
+        return {'monthly': float(self.get_monthly_cost()), 'unpriced': []}
