@@ -5,7 +5,8 @@ The tests need ``API_URL``; ``make integration`` sets it when it runs pytest
 inside the compose network. Without it every test here is skipped. Before
 the first test runs, the API, moto and fake ARM are polled for up to
 ``WAIT_SECONDS``: the API must answer ``/healthz`` with 200, and moto and
-fake ARM only have to give any HTTP response.
+fake ARM only have to give any HTTP response. The API key is read the same
+way the API reads it (``MC_API_KEY`` or the shared ``MC_API_KEY_FILE``).
 """
 
 import os
@@ -13,6 +14,8 @@ import time
 
 import pytest
 import requests
+
+from auth import load_api_key
 
 WAIT_SECONDS = 60
 POLL_INTERVAL = 1
@@ -52,14 +55,20 @@ def stack_ready(api_url):
     wait_for(api_url + '/healthz', need_ok=True)
 
 
+@pytest.fixture(scope='session')
+def api_key(stack_ready):
+    return load_api_key()
+
+
 @pytest.fixture
-def gql(api_url):
+def gql(api_url, api_key):
     """POST a GraphQL query to the API and return its ``data``."""
 
     def run(query, variables=None):
         resp = requests.post(
             api_url + '/graphql',
             json={'query': query, 'variables': variables or {}},
+            headers={'Authorization': 'Bearer ' + api_key},
             timeout=30,
         )
         body = resp.json()

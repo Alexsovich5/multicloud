@@ -4,6 +4,7 @@ End-to-end flow over HTTP: the API provisions on moto (EC2) and fake ARM
 """
 
 import pytest
+import requests
 
 PROVISION = '''
 mutation($provider: String!, $name: String!) {
@@ -74,3 +75,17 @@ def test_destroy_removes_both(gql, created):
     ids = _ids(gql(INSTANCES)['instances'])
     for provider, inst_id in created.items():
         assert (provider, inst_id) not in ids
+
+
+@pytest.mark.parametrize('headers', [
+    {}, {'Authorization': 'Bearer not-the-key-0123456789abcdef'},
+])
+def test_api_refuses_requests_without_the_key(api_url, gql, headers):
+    resp = requests.post(
+        api_url + '/graphql',
+        json={'query': 'mutation { provisionInstance(provider: "aws", '
+                       'name: "intruder") { id } }'},
+        headers=headers, timeout=30)
+    assert resp.status_code == 401
+    names = {i['name'] for i in gql(INSTANCES)['instances']}
+    assert 'intruder' not in names

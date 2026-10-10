@@ -16,8 +16,10 @@ setup.cfg
 simulators/__init__.py
 simulators/fake_arm.py
 src/app.py
+src/auth.py
 src/cloud_manager.py
 src/config.py
+src/graphiql_page.py
 src/graphql_schema.py
 src/pricing.py
 src/providers/__init__.py
@@ -38,10 +40,12 @@ tests/integration/test_stack.py
 tests/unit/__init__.py
 tests/unit/fakes.py
 tests/unit/test_app.py
+tests/unit/test_auth.py
 tests/unit/test_aws_provider.py
 tests/unit/test_azure_provider.py
 tests/unit/test_cloud_manager.py
 tests/unit/test_config.py
+tests/unit/test_container_config.py
 tests/unit/test_environment.py
 tests/unit/test_fake_arm.py
 tests/unit/test_graphql_mutations.py

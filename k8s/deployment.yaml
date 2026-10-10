@@ -1,6 +1,9 @@
 # GraphQL API for the multicloud manager. The endpoint variables point the
 # providers at the moto and fake ARM simulators; remove them to use the
-# real AWS and Azure APIs.
+# real AWS and Azure APIs. The API key comes from a Secret that is not part
+# of this file; create it first, for example:
+#   kubectl create secret generic multicloud-api-key \
+#     --from-literal=api-key="$(openssl rand -hex 32)"
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -30,6 +33,11 @@ spec:
               value: http://moto:5000
             - name: MC_AZURE_BASE_URL
               value: http://fake-arm:5001
+            - name: MC_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: multicloud-api-key
+                  key: api-key
           readinessProbe:
             httpGet:
               path: /healthz

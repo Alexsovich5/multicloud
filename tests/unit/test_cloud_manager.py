@@ -111,3 +111,25 @@ def test_normalize_instance_rejects_unknown_field():
     with pytest.raises(TypeError):
         normalize_instance(id='i-1', provider='aws', type='t2.micro',
                            state='running', region='us-east-1', zone='a')
+
+
+@pytest.mark.parametrize('name', [
+    '../web', 'web/1', 'web\n1', 'web 1', '-web', '.web', 'w' * 65, 'web%2F1', 5,
+])
+def test_provision_rejects_names_unsafe_for_resource_paths(manager, name):
+    with pytest.raises(ValueError):
+        manager.provision('azure', {'name': name})
+    assert manager.list_resources() == []
+
+
+@pytest.mark.parametrize('name', ['w', 'web-1', 'Web_1.prod', 'w' * 64])
+def test_provision_accepts_ordinary_names(manager, name):
+    assert manager.provision('aws', {'name': name})['name'] == name
+
+
+@pytest.mark.parametrize('resource_id', ['../x', 'a/b', 'a\r\nb', '', 'i' * 65])
+def test_destroy_rejects_ids_unsafe_for_resource_paths(manager, resource_id):
+    created = manager.provision('azure', {'name': 'z1'})
+    with pytest.raises(ValueError):
+        manager.destroy('azure', resource_id)
+    assert [i['id'] for i in manager.list_resources()] == [created['id']]

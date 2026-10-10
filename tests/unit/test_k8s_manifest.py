@@ -88,3 +88,11 @@ def test_service_targets_the_api_port(service, deployment):
     labels = deployment["spec"]["template"]["metadata"]["labels"]
     for key, value in service["spec"]["selector"].items():
         assert labels.get(key) == value
+
+
+def test_api_key_comes_from_a_secret_not_the_manifest(container):
+    env = {item["name"]: item for item in container["env"]}
+    key = env["MC_API_KEY"]
+    assert "value" not in key
+    ref = key["valueFrom"]["secretKeyRef"]
+    assert ref == {"name": "multicloud-api-key", "key": "api-key"}

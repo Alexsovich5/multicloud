@@ -14,10 +14,11 @@ Personal project built on the 2018-era stack (Python 3.6, Flask 1.0, Graphene 2,
 - CloudManager: dispatches to the configured providers, merges their results and raises `ValueError` for unknown provider names. Code: `src/cloud_manager.py`. Tests: `tests/unit/test_cloud_manager.py`.
 - Cost estimate: running instances × hourly list price × 730 hours per provider, plus a total. Code: `src/pricing.py`, `config/pricing.yaml`. Tests: `tests/unit/test_pricing.py`, `tests/unit/test_cloud_manager.py`.
 - GraphQL API at `/graphql` with GraphiQL: queries `providers`, `instances(provider)` and `costs`, mutations `provisionInstance` and `destroyInstance`, and a `/healthz` endpoint. Code: `src/graphql_schema.py`, `src/app.py`. Tests: `tests/unit/test_graphql_queries.py`, `tests/unit/test_graphql_mutations.py`, `tests/unit/test_app.py`.
+- API key authentication: every `/graphql` request (queries and mutations) needs `Authorization: Bearer <key>`, compared in constant time; a missing or wrong key gets a bare 401. The key comes from `MC_API_KEY` or is generated on first start into `MC_API_KEY_FILE` (mode 0600, never committed), and the app refuses to start without one. POST bodies must be JSON (Content-Type application/json), so a cross-site form cannot trigger a mutation. Browsers get a static GraphiQL page that asks for the key and keeps it in `sessionStorage`. Unexpected resolver errors are returned as "Internal server error" without exception text. Instance names and ids are restricted to plain identifiers before they reach a cloud API path. Code: `src/auth.py`, `src/app.py`, `src/graphiql_page.py`, `src/cloud_manager.py`. Tests: `tests/unit/test_auth.py`, `tests/unit/test_app.py`, `tests/unit/test_cloud_manager.py`, `tests/integration/test_stack.py`.
 - YAML configuration with environment overrides for the endpoints (`MC_AWS_ENDPOINT`, `MC_AZURE_BASE_URL`). Code: `src/config.py`, `config/multicloud.yml`. Tests: `tests/unit/test_config.py`.
 - Fake Azure Resource Manager: a Flask app implementing the resource group and VM REST calls the SDK makes, with case-insensitive paths. Code: `simulators/fake_arm.py`. Tests: `tests/unit/test_fake_arm.py`.
 - Terraform 0.11: `terraform/main.tf` calls the shared `terraform/modules/compute` module once for AWS and once for Azure. Both pass `terraform validate`, and a resource-targeted AWS plan against moto shows `Plan: 2 to add`. Tests: `tests/unit/test_terraform_layout.py`, plus `make tf-validate` and `make tf-plan`.
-- Local stack: `docker-compose.yml` runs the API, a moto EC2 server and the fake ARM server. Tests: `tests/integration/test_stack.py` (provision on both clouds, list, costs, destroy).
+- Local stack: `docker-compose.yml` runs the API, a moto EC2 server and the fake ARM server. Only the API port is published, and only on 127.0.0.1. Tests: `tests/integration/test_stack.py` (provision on both clouds, list, costs, destroy, requests without the key refused), `tests/unit/test_container_config.py` (loopback-only ports, no committed key).
 - Kubernetes 1.11 manifest: a Deployment and a Service for the API image. Code: `k8s/deployment.yaml`. Tests: `tests/unit/test_k8s_manifest.py`, plus `make k8s-validate` (kubeval 0.7.3 against the v1.11.0 schemas).
 
 **Not implemented / known limitations**
@@ -31,7 +32,9 @@ Personal project built on the 2018-era stack (Python 3.6, Flask 1.0, Graphene 2,
 - The Kubernetes manifest is schema-validated but has never been deployed to a cluster.
 - Compute only: no storage, networking or IAM management through the API (Terraform creates a VNet/NIC only as far as an Azure VM needs one).
 - No web dashboard; the unified view is the GraphQL `instances` query and GraphiQL.
-- No API authentication or multi-user access; it is meant for local use. The API keeps no state of its own, and the simulators lose theirs on restart.
+- Authentication is one shared operator key: no users, roles or per-user audit. There is no TLS; the API is published on 127.0.0.1 only and is meant for local use. `/healthz` is unauthenticated and only reports that the process is up and which providers are configured. The API keeps no state of its own, and the simulators lose theirs on restart; `make down` also removes the key volume, so the next `make up` generates a new key.
+- An instance size missing from the price table is priced at 0.0 (with a log warning), so the cost total can understate the real cost without the API saying so.
+- The containers run as root.
 - `make tf-*`, `make k8s-validate` and the image build need network access to download providers, schemas and packages.
 - pytest is held at 3.5.1, the newest release that does not depend on atomicwrites.
 
@@ -52,11 +55,12 @@ Full transitive pins are in `requirements.txt` and `requirements-dev.txt`.
 Everything runs in Docker images from the project's era, so nothing needs installing locally beyond Docker.
 
 ```bash
-docker compose -p multicloud up    # start api, moto and fake-arm (API on host port 20901)
+docker compose -p multicloud up -d # start api, moto and fake-arm (API on 127.0.0.1:20901)
 make smoke                         # POST a GraphQL query listing instances and costs
+make api-key                       # print the API key generated for this stack
 ```
 
-GraphiQL is served at http://localhost:20901/graphql. `make run` starts the API alone on host port 20900, without the simulators.
+Every GraphQL request needs the key as `Authorization: Bearer <key>`. GraphiQL is served at http://127.0.0.1:20901/graphql and asks for the key once per browser tab. `make run` starts the API alone on 127.0.0.1:20900, without the simulators; its key is in the container (`docker exec multicloud-run cat /run/multicloud/api_key`). To use a key of your own, set `MC_API_KEY` (at least 16 characters). The Kubernetes manifest reads it from a Secret named `multicloud-api-key`, which you create yourself.
 
 ## Tests
 
@@ -87,8 +91,10 @@ setup.cfg
   __init__.py
   fake_arm.py
   app.py
+  auth.py
   cloud_manager.py
   config.py
+  graphiql_page.py
   graphql_schema.py
   pricing.py
     __init__.py
@@ -109,10 +115,12 @@ setup.cfg
     __init__.py
     fakes.py
     test_app.py
+    test_auth.py
     test_aws_provider.py
     test_azure_provider.py
     test_cloud_manager.py
     test_config.py
+    test_container_config.py
     test_environment.py
     test_fake_arm.py
     test_graphql_mutations.py

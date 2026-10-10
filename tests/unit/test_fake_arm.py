@@ -163,3 +163,18 @@ def test_head_resource_group_reports_existence(client):
     assert client.head(RG_PATH + API).status_code == 404
     put_json(client, RG_PATH, {'location': 'eastus'})
     assert client.head(RG_PATH.upper() + API).status_code == 204
+
+
+def test_main_listens_on_loopback_unless_host_is_set(monkeypatch):
+    import simulators.fake_arm as fake_arm
+    calls = []
+    monkeypatch.setattr(fake_arm.Flask, 'run',
+                        lambda self, **kwargs: calls.append(kwargs))
+    monkeypatch.delenv('HOST', raising=False)
+    monkeypatch.delenv('PORT', raising=False)
+    fake_arm.main()
+    monkeypatch.setenv('HOST', '0.0.0.0')
+    monkeypatch.setenv('PORT', '5009')
+    fake_arm.main()
+    assert calls == [{'host': '127.0.0.1', 'port': 5001},
+                     {'host': '0.0.0.0', 'port': 5009}]

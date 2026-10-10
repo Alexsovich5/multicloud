@@ -390,9 +390,40 @@ Conventions used throughout:
 
 ---
 
-Total: 15 tasks (T1–T15). Each task depends only on the tasks before it:
+Total: 16 tasks (T1–T16). Each task depends only on the tasks before it:
 - T2–T3 come before T4 and T6, which use the base class and the price table.
 - T5 comes before T6, whose tests use the fake ARM.
 - T7 comes before T10 and T11.
 - T8 and T9 come before T10, which comes before T11.
 - T11 provides the moto service that T13 uses.
+- T16 hardens the finished stack and touches the API, compose, Makefile and manifest from T10–T15.
+
+## T16 — Security and hygiene hardening
+
+- **Goal:** Close the gaps found in a whole-repo security review without changing the GraphQL schema.
+- **Found:**
+  - (blocker) `/graphql` had no authentication: anyone who could reach the port could list inventory, provision and destroy instances.
+  - (blocker) CSRF: Flask-GraphQL accepts `application/x-www-form-urlencoded`, `multipart/form-data` and `application/graphql` POSTs, so a cross-site HTML form could run `provisionInstance`/`destroyInstance`. The default GraphiQL page also executed `?query=` server-side and fetched with `credentials: 'include'`.
+  - (major) `docker-compose.yml` published `20901:8000` and `make run` published `20900:8000` on every host interface.
+  - (major) Resolver exceptions (botocore, msrest, requests connection errors) were returned to the client verbatim, including internal URLs and paths.
+  - (minor) Instance names and ids went unchecked into ARM URL paths; the fake ARM `main()` listened on 0.0.0.0 by default; responses had no framing/sniffing headers; GraphiQL assets loaded over protocol-relative URLs without SRI.
+  - (minor, documented only) unknown instance sizes are priced at 0.0 so the total can understate cost; containers run as root.
+- **Changed:**
+  - create `src/auth.py`: `load_api_key()` reads `MC_API_KEY`, or `MC_API_KEY_FILE` (created with a random 64-hex key, mode 0600, via temp file + `os.link` if missing), and raises `ApiKeyError` when neither is set or the key is shorter than 16 characters; `key_matches()` checks `Bearer <key>` with `hmac.compare_digest`.
+  - modify `src/app.py`: `ProtectedGraphQLView` (GET/POST only) serves a static GraphiQL page for HTML requests, requires the key on every other request (bare 401 + `WWW-Authenticate: Bearer`), requires `application/json` POSTs (415), and masks unexpected resolver errors as `"Internal server error"`, logging only the exception type. `create_app(manager=None, api_key=None)` refuses to start without a key. All responses get `X-Frame-Options: DENY` and `X-Content-Type-Options: nosniff`.
+  - create `src/graphiql_page.py`: static GraphiQL page that prompts for the key, keeps it in `sessionStorage`, sends it as a Bearer header and loads GraphiQL/React from jsdelivr over HTTPS with SRI hashes.
+  - modify `src/cloud_manager.py`: `check_identifier()` limits instance names and ids to `[A-Za-z0-9][A-Za-z0-9._-]{0,63}`.
+  - modify `simulators/fake_arm.py`: `main()` listens on `HOST`, default 127.0.0.1; compose sets `HOST=0.0.0.0` inside the container.
+  - modify `Dockerfile` (`MC_API_KEY_FILE=/run/multicloud/api_key`), `docker-compose.yml` (`127.0.0.1:20901:8000`, `api-key` volume), `Makefile` (`run` on `127.0.0.1:$(RUN_PORT)` as container `multicloud-run`; `smoke` pipes the key header to `curl -H @-`; new `api-key` target) and `k8s/deployment.yaml` (`MC_API_KEY` from Secret `multicloud-api-key`).
+  - modify `tests/integration/conftest.py` to send the key and `tests/integration/test_stack.py` to check that requests without the right key get 401.
+  - update `docs/SPEC.md` (new "API authentication" section, out-of-scope and limitation rows) and `README.md` (Status, limitations, Running it, Layout) and `MANIFEST`.
+- **Tests written first:** `tests/unit/test_auth.py` (env key, key file read/created 0600, unique keys, no key, short key not echoed, Bearer matching); `tests/unit/test_app.py` (every query and mutation refused without/with a wrong key and nothing changed, GET queries need the key, cross-origin form POST refused, non-JSON POST 415, PUT/DELETE/PATCH 405, GraphiQL page static and runs no query, security headers, sentinel secret in a provider exception not returned or logged, key never echoed or logged, app refuses to start without a key); `tests/unit/test_cloud_manager.py` (unsafe names/ids rejected); `tests/unit/test_fake_arm.py` (loopback default); `tests/unit/test_container_config.py` (every compose and Makefile publish is 127.0.0.1-only, key volume mounted and no key in compose/Dockerfile, no unauthenticated or plain-HTTP package sources); `tests/unit/test_k8s_manifest.py` (key from a Secret).
+- **Acceptance:** `make test && make integration`, then `make up && make smoke`, a keyless and a cross-origin form POST to 127.0.0.1:20901 both return 401, `make k8s-validate`, then `docker compose -p multicloud down`.
+- **Commit:**
+  ```
+  Require an API key and JSON bodies on the GraphQL API
+
+  Adds operator key auth, blocks cross-site form posts, masks
+  unexpected errors, validates instance identifiers and publishes
+  the stack on 127.0.0.1 only.
+  ```

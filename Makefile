@@ -6,7 +6,7 @@ TERRAFORM ?= docker run --rm -v $(CURDIR)/terraform:/tf -w /tf hashicorp/terrafo
 KUBEVAL ?= docker run --rm -v $(CURDIR)/k8s:/k8s garethr/kubeval:0.7.3
 TF_MOTO ?= docker run --rm --network multicloud_default -v $(CURDIR)/terraform:/tf -w /tf -e TF_VAR_aws_endpoint=http://moto:5000 hashicorp/terraform:0.11.10
 
-.PHONY: build test run up down integration smoke tf-validate tf-plan k8s-validate
+.PHONY: build test run up down integration smoke api-key tf-validate tf-plan k8s-validate
 
 build:
 	docker build -t $(IMAGE) .
@@ -15,7 +15,8 @@ test: build
 	docker run --rm $(IMAGE) sh -c "flake8 src simulators tests && python -m pytest tests/unit -q"
 
 run: build
-	docker run --rm -p $(RUN_PORT):8000 $(IMAGE) gunicorn -b 0.0.0.0:8000 "app:create_app()"
+	docker run --rm --name multicloud-run -p 127.0.0.1:$(RUN_PORT):8000 $(IMAGE) \
+	  gunicorn -b 0.0.0.0:8000 "app:create_app()"
 
 up:
 	$(COMPOSE) up -d --build
@@ -28,10 +29,15 @@ integration: build
 	$(COMPOSE) run --rm -e API_URL=http://api:8000 api python -m pytest tests/integration -q; \
 	status=$$?; $(MAKE) down; exit $$status
 
+# The key is piped to curl on stdin so it never shows up in a process list.
 smoke:
-	curl -sf -H 'Content-Type: application/json' \
+	$(COMPOSE) exec -T api sh -c 'printf "Authorization: Bearer %s\n" "$$(cat $$MC_API_KEY_FILE)"' | \
+	curl -sf -H @- -H 'Content-Type: application/json' \
 	  -d '{"query": "{ instances { id provider } costs { total } }"}' \
-	  http://localhost:$(API_PORT)/graphql
+	  http://127.0.0.1:$(API_PORT)/graphql
+
+api-key:
+	@$(COMPOSE) exec -T api cat /run/multicloud/api_key
 
 tf-validate:
 	$(TERRAFORM) init -backend=false -input=false

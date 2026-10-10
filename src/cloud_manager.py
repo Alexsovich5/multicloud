@@ -5,6 +5,7 @@ Unified interface for managing resources across AWS and Azure.
 """
 
 import logging
+import re
 
 from config import load_config, resolve_path
 from pricing import DEFAULT_CURRENCY, PriceTable
@@ -12,6 +13,18 @@ from providers.aws_provider import AWSProvider
 from providers.azure_provider import AzureProvider
 
 logger = logging.getLogger('cloud_manager')
+
+# Instance names and ids end up in cloud API URL paths (ARM puts the VM name
+# in the path), so only plain identifiers are accepted.
+IDENTIFIER = re.compile(r'[A-Za-z0-9][A-Za-z0-9._-]{0,63}\Z')
+
+
+def check_identifier(value, what):
+    """Raise ValueError unless ``value`` is a plain resource identifier."""
+    if not isinstance(value, str) or not IDENTIFIER.match(value):
+        raise ValueError('Invalid %s: use 1-64 letters, digits, ".", "_" or "-", '
+                         'starting with a letter or digit' % what)
+    return value
 
 
 class CloudManager:
@@ -58,6 +71,7 @@ class CloudManager:
         target = self._get(provider)
         if not spec.get('name'):
             raise ValueError("spec['name'] is required")
+        check_identifier(spec['name'], 'instance name')
         return target.create_instance(spec)
 
     def get_costs(self):
@@ -70,7 +84,9 @@ class CloudManager:
 
     def destroy(self, provider, resource_id):
         """Destroy a resource on a specific cloud."""
-        return self._get(provider).destroy_instance(resource_id)
+        target = self._get(provider)
+        check_identifier(resource_id, 'instance id')
+        return target.destroy_instance(resource_id)
 
 
 def build_manager(config_path=None):

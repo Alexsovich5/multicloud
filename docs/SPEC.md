@@ -22,7 +22,7 @@ Neither cloud is contacted for real. AWS EC2 is simulated with moto, and Azure R
 3. **Azure compute via the Azure SDK.** List, create and delete VMs in a resource group, creating the group if it does not exist. This uses `azure-mgmt-compute` and `azure-mgmt-resource` with a configurable ARM `base_url`, so the same code runs against the fake ARM server.
 4. **CloudManager.** Dispatches to the configured providers and merges results from all of them. Unknown provider names raise `ValueError`.
 5. **Cross-cloud cost estimate.** Monthly cost per provider plus a total, computed as running instances × hourly list price (from `config/pricing.yaml`) × 730 h. This is an estimate from a static price table, not billing data.
-6. **GraphQL API.** Flask 1.0 + Graphene 2 + Flask-GraphQL 2 at `/graphql`, with GraphiQL. Queries: `providers`, `instances(provider)`, `costs`. Mutations: `provisionInstance`, `destroyInstance`. There is also a plain `/healthz` endpoint.
+6. **GraphQL API.** Flask 1.0 + Graphene 2 + Flask-GraphQL 2 at `/graphql`, with GraphiQL. Queries: `providers`, `instances(provider)`, `costs`. Mutations: `provisionInstance`, `destroyInstance`. There is also a plain `/healthz` endpoint. Every `/graphql` request needs the operator API key (see "API authentication").
 7. **YAML configuration.** `config/multicloud.yml` says which providers are enabled, sets region/location/resource group, and gives the endpoints. Environment variables override the endpoints (`MC_AWS_ENDPOINT`, `MC_AZURE_BASE_URL`).
 8. **Terraform 0.11 multi-cloud IaC.** `terraform/main.tf` calls a reusable `modules/compute` module once for AWS and once for Azure, selected with `provider_type`. Both pass `terraform validate`. The AWS side also passes a resource-targeted `terraform plan` (`-target=module.aws_compute.data.aws_availability_zones.available -target=module.aws_compute.aws_instance.this`) that reads availability zones from the moto EC2 endpoint and shows `Plan: 2 to add`. Targeting the resources rather than the whole module keeps the azurerm provider out of the graph, so no Azure credentials are needed.
 9. **Local stack via docker-compose.** Three services: `api` (gunicorn + Flask), `moto` (moto EC2 server) and `fake-arm` (simulated Azure ARM). One `curl` against `/graphql` shows instances from both clouds.
@@ -42,7 +42,7 @@ Neither cloud is contacted for real. AWS EC2 is simulated with moto, and Azure R
 | "50% faster provisioning", other impact metrics | These are not measurable in this repo and are dropped. |
 | "Vendor flexibility / avoid lock-in" as a claim | This is delivered only as feature 1 (provider abstraction). It is not a claim. |
 | Python 3.7 | Python 3.6 was the dominant production runtime in 2018 (3.7 came out in June 2018, and many libraries still lagged). The target stack for this rebuild is 3.6. |
-| API authentication / multi-user access | Not described in the README. The API is meant for local use only. |
+| Multi-user access, roles, TLS | Not described in the README. One shared operator API key protects the API (see "API authentication"), and the API is published on 127.0.0.1 only for local use. |
 
 ## Architecture
 
@@ -150,7 +150,16 @@ type Mutation {
   destroyInstance(provider: String!, id: String!): DestroyResult
 }
 ```
-An unknown provider returns a GraphQL error (`errors[0].message = "Unknown provider: gcp"`). HTTP: `POST /graphql` (JSON `{query, variables}`), `GET /graphql` (GraphiQL), `GET /healthz` → `{"status":"ok","providers":[...]}`.
+An unknown provider returns a GraphQL error (`errors[0].message = "Unknown provider: gcp"`). HTTP: `POST /graphql` (JSON `{query, variables}`), `GET /graphql?query=...` (queries only), `GET /graphql` with `Accept: text/html` (static GraphiQL page), `GET /healthz` → `{"status":"ok","providers":[...]}`. Instance names and ids must be 1-64 characters of letters, digits, `.`, `_` or `-`, starting with a letter or digit; anything else is a `ValueError` before any cloud call. Resolver errors other than `ValueError`/`KeyError`/`GraphQLError` are returned as `"Internal server error"` and logged by exception type only.
+
+### API authentication
+
+- Every `/graphql` request except the GraphiQL HTML page needs `Authorization: Bearer <key>`. The key is compared with `hmac.compare_digest`. A missing or wrong key gets `401` with `{"errors":[{"message":"Unauthorized"}]}` and `WWW-Authenticate: Bearer`, nothing else.
+- `POST` bodies must be `application/json` (`415` otherwise), so a cross-site HTML form (urlencoded, multipart or text/plain) cannot reach a mutation, and the API sets no CORS headers. `PUT`/`DELETE`/`PATCH` get `405`.
+- The key comes from `MC_API_KEY`, or from the file named by `MC_API_KEY_FILE` (the image sets `/run/multicloud/api_key`). A missing file is created with a random 64-hex-character key, mode 0600, written to a temp file and hard-linked into place so concurrent workers agree on one key. With neither set, `create_app()` raises and the server does not start. Keys shorter than 16 characters are rejected. No key is stored in the repository.
+- Compose keeps the key file in the `api-key` volume (`make api-key` prints it, `make smoke` pipes it to curl on stdin). The Kubernetes manifest reads `MC_API_KEY` from the Secret `multicloud-api-key` (key `api-key`), created outside the manifest.
+- The GraphiQL page is static: nothing from the request is rendered into it and no query runs while serving it. It asks for the key once, keeps it in `sessionStorage` and sends it as a Bearer header; GraphiQL and React load from jsdelivr with Subresource Integrity hashes. All responses carry `X-Frame-Options: DENY` and `X-Content-Type-Options: nosniff`.
+- Published ports (compose and `make run`) are bound to 127.0.0.1. The fake ARM server listens on `HOST` (default 127.0.0.1; compose sets 0.0.0.0 inside its container and does not publish it).
 
 ### Fake ARM REST surface (`simulators/fake_arm.py`, api-version ignored)
 
@@ -174,7 +183,7 @@ Inputs: `provider_type` ("aws" or "azure"), `name_prefix`, `instance_count`, `in
 
 ### Make targets
 
-`make build`, `make test` (depends on `build`; flake8 + unit tests in the period image), `make integration` (depends on `build`; compose stack + integration tests), `make run` (gunicorn on container port 8000, published on host port `RUN_PORT`, default 20900, without the simulators), `make tf-validate`, `make tf-plan`, `make k8s-validate`, `make up`, `make down`, `make smoke`.
+`make build`, `make test` (depends on `build`; flake8 + unit tests in the period image), `make integration` (depends on `build`; compose stack + integration tests), `make run` (gunicorn on container port 8000, published on 127.0.0.1 port `RUN_PORT`, default 20900, without the simulators), `make tf-validate`, `make tf-plan`, `make k8s-validate`, `make up`, `make down`, `make smoke` (sends the stack's API key), `make api-key` (prints it).
 
 ## Stack & pinned versions
 
@@ -292,5 +301,6 @@ No files are deleted. The README also listed `src/graphql_schema.py`, `terraform
 - The fake ARM server implements only the resource group and VM endpoints the SDK calls here. It does not model NICs, disks or power state, so Azure `ip` is always null.
 - `terraform init`, `make tf-*` and `make k8s-validate` need network access to download providers and schemas. The unit tests make no outbound calls, but building the image (which `make test` does first) needs PyPI access.
 - The Kubernetes manifest is schema-validated but has never been deployed to a cluster.
-- The API has no authentication and keeps no state of its own. State lives in the simulators and is lost when they restart.
+- The API is protected by one shared operator key: no users, roles or TLS. It keeps no state of its own. State lives in the simulators and is lost when they restart.
+- An instance size missing from the price table is priced at 0.0 with a log warning, so the cost total can understate the real cost.
 - pytest is held at 3.5.1 because atomicwrites, which later pytests need, carries a 2022 re-upload date on PyPI and fails the period check.

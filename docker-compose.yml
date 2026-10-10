@@ -1,6 +1,8 @@
 version: "3.6"
 
-# One image serves all three services; only api builds it.
+# One image serves all three services; only api builds it. The API port is
+# published on 127.0.0.1 only; moto and fake-arm are not published at all.
+# The API key is generated on first start into the api-key volume.
 services:
   api:
     build: .
@@ -12,8 +14,10 @@ services:
     depends_on:
       - moto
       - fake-arm
+    volumes:
+      - api-key:/run/multicloud
     ports:
-      - "20901:8000"
+      - "127.0.0.1:20901:8000"
 
   moto:
     image: multicloud:dev
@@ -23,7 +27,11 @@ services:
     image: multicloud:dev
     command: python -m simulators.fake_arm
     environment:
+      HOST: 0.0.0.0
       PORT: "5001"
+
+volumes:
+  api-key:
 
 networks:
   default:

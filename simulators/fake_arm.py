@@ -156,8 +156,10 @@ def create_app():
 
 
 def main():
+    """Serve on ``HOST`` (default 127.0.0.1) and ``PORT`` (default 5001)."""
+    host = os.environ.get('HOST', '127.0.0.1')
     port = int(os.environ.get('PORT', '5001'))
-    create_app().run(host='0.0.0.0', port=port)
+    create_app().run(host=host, port=port)
 
 
 if __name__ == '__main__':
